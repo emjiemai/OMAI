@@ -1,66 +1,56 @@
-"""Settings, read from the environment (or .env). Secrets never live in the repo."""
+"""Settings, read from the environment (or .env). Secrets never live in the repo.
+
+Only variables that already exist in the company's shared environment are read (the same group mgmg-agents
+uses). ``DATABASE_URL`` is set by Render from the attached database. Everything else is a constant below.
+"""
 
 from __future__ import annotations
 
+import hashlib
 from zoneinfo import ZoneInfo
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# --- policy starting values (the approved policy replaces them) ---
+SYNC_STALE_MINUTES = 60          # a critical source older than this blocks digital release
+COUNT_TOLERANCE_UNITS = 0.0      # any difference above this is "material"
+COUNT_TOLERANCE_VALUE = 0.0
+ADJUSTMENT_LIMIT_MANAGER = 5_000_000      # so'm; above → accountant / owner
+ADJUSTMENT_LIMIT_ACCOUNTANT = 50_000_000
+
+# --- 1C OData: which register and columns hold stock (finance confirms) ---
+ONEC_BALANCE_ENTITY = "AccumulationRegister_ТоварыНаСкладах/Balance"
+ONEC_ITEM_FIELD = "Номенклатура_Key"
+ONEC_WAREHOUSE_FIELD = "Склад_Key"
+ONEC_QTY_FIELD = "КоличествоBalance"
+
+# --- Billz ---
+BILLZ_BASE_URL = "https://api-admin.billz.ai"
+BILLZ_STOCK_PATH = "/v2/products"   # verify with Billz for our plan
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-
     database_url: str = "sqlite:///./omai.db"
-    timezone: str = "Asia/Tashkent"
-    run_scheduler: bool = False  # the API process starts the schedule when true (one process only)
+    environment: str = "development"   # ENVIRONMENT=production starts the daily schedule
+    dry_run: bool = False               # DRY_RUN=true: nothing is sent out
 
-    # --- SAP Business One Service Layer (supported connector, ref [2]) ---
-    sap_sl_url: str = ""          # e.g. https://sap-server:50000/b1s/v1
-    sap_company_db: str = ""
-    sap_read_user: str = ""       # read-only SAP user
-    sap_read_password: SecretStr = SecretStr("")
-    sap_post_user: str = ""       # separate SAP user, only for authorized postings
-    sap_post_password: SecretStr = SecretStr("")
-    sap_verify_tls: bool = True
-    # SAP gateway push (as in mgmg-agents): the gateway machine POSTs to /sap/push
-    sap_push_secret: SecretStr = SecretStr("")
+    sap_push_webhook_secret: SecretStr = SecretStr("")   # the SAP gateway machine pushes to POST /sap/push
 
-    # --- 1C OData (ref [3]) ---
     onec_odata_url: str = ""
     onec_login: str = ""
     onec_password: SecretStr = SecretStr("")
 
-    # --- Billz 2.0 ---
     billz_secret_token: SecretStr = SecretStr("")
-    billz_base_url: str = "https://api-admin.billz.ai"
 
-    # --- Telegram (the approved messaging channel) ---
-    telegram_bot_token: SecretStr = SecretStr("")
-    telegram_webhook_secret: SecretStr = SecretStr("")
+    telegram_primary_bot_token: SecretStr = SecretStr("")
 
-    # --- AIPRO / MIYA / CASH (other agents) ---
-    aipro_webhook_url: str = ""
-    miya_webhook_url: str = ""
-    cash_webhook_secret: SecretStr = SecretStr("")
-
-    # --- staff workspace login ---
-    session_secret: SecretStr = SecretStr("change-me")
-
-    # --- policy (starting values; the approved policy overrides them in the DB) ---
-    sync_stale_minutes: int = 60          # a critical source older than this blocks digital release
-    count_tolerance_units: float = 0.0    # any difference above this is "material"
-    count_tolerance_value: float = 0.0
-    adjustment_limit_manager: float = 5_000_000   # so'm; above → accountant/owner
-    adjustment_limit_accountant: float = 50_000_000
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 
     @property
     def tz(self) -> ZoneInfo:
-        return ZoneInfo(self.timezone)
-
-    @property
-    def sap_configured(self) -> bool:
-        return bool(self.sap_sl_url and self.sap_company_db and self.sap_read_user)
+        import os
+        return ZoneInfo(os.getenv("TZ") or "Asia/Tashkent")
 
     @property
     def onec_configured(self) -> bool:
@@ -72,7 +62,16 @@ class Settings(BaseSettings):
 
     @property
     def telegram_configured(self) -> bool:
-        return bool(self.telegram_bot_token.get_secret_value())
+        return bool(self.telegram_primary_bot_token.get_secret_value())
+
+    @property
+    def run_scheduler(self) -> bool:
+        return self.environment == "production"
+
+    def derived_secret(self, purpose: str) -> str:
+        """A per-purpose secret derived from the existing bot token (no extra variable)."""
+        base = self.telegram_primary_bot_token.get_secret_value() or self.database_url
+        return hashlib.sha256(f"omai:{purpose}:{base}".encode()).hexdigest()
 
 
 settings = Settings()

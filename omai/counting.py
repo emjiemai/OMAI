@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from omai import approvals, tasks
-from omai.config import settings
+from omai.config import COUNT_TOLERANCE_UNITS, COUNT_TOLERANCE_VALUE
 from omai.ledger import GUARDS, TRANSIT, StockError, audit, balance, positions, raise_exception
 from omai.models import (Bin, Count, CountLine, CountResult, CountSchedule, ExternalBalance, Item, Movement,
                          MovementLine, Role, User, now_utc)
@@ -162,7 +162,7 @@ def _book_serials(s: Session, count: Count, line: CountLine) -> set[str]:
 
 
 def material(diff: float, unit_cost: float) -> bool:
-    return abs(diff) > settings.count_tolerance_units or abs(diff) * unit_cost > settings.count_tolerance_value > 0
+    return abs(diff) > COUNT_TOLERANCE_UNITS or abs(diff) * unit_cost > COUNT_TOLERANCE_VALUE > 0
 
 
 def evaluate(s: Session, count: Count) -> dict:

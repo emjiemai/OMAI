@@ -1,4 +1,5 @@
-"""Outgoing messages go through the outbox: written in the same transaction as the change that caused
+"""Outgoing messages go through the outbox (AIPRO / MIYA rows stay queued for those agents to read from the
+shared database; no extra webhook settings): written in the same transaction as the change that caused
 them, sent by ``deliver_outbox`` with retries. A restart never loses or doubles a message."""
 
 from __future__ import annotations
@@ -40,20 +41,17 @@ def task_buttons(task_id: str) -> list[list[dict]]:
 
 
 def _send(client: httpx.Client, m: Outbox) -> None:
+    if settings.dry_run:
+        raise _Skip()
     if m.channel == "telegram":
         if not settings.telegram_configured or not m.to or m.to.startswith("user:"):
             raise _Skip()  # no channel: the workspace shows the task anyway
         payload: dict = {"chat_id": m.to, "text": m.body["text"], "parse_mode": "HTML"}
         if m.body.get("buttons"):
             payload["reply_markup"] = {"inline_keyboard": m.body["buttons"]}
-        r = client.post(f"https://api.telegram.org/bot{settings.telegram_bot_token.get_secret_value()}/sendMessage",
+        r = client.post(f"https://api.telegram.org/bot{settings.telegram_primary_bot_token.get_secret_value()}/sendMessage",
                         json=payload)
         r.raise_for_status()
-    elif m.channel in ("aipro", "miya"):
-        url = settings.aipro_webhook_url if m.channel == "aipro" else settings.miya_webhook_url
-        if not url:
-            raise _Skip()
-        client.post(url, json=m.body).raise_for_status()
     else:
         raise ValueError(f"unknown channel {m.channel}")
 
@@ -65,7 +63,7 @@ class _Skip(Exception):
 def deliver_outbox(s: Session, client: httpx.Client | None = None, limit: int = 100) -> int:
     """Send what is queued; returns how many were sent. A message with no channel configured is skipped."""
     sent = 0
-    rows = s.scalars(select(Outbox).where(Outbox.status == "queued").order_by(Outbox.created_at).limit(limit)).all()
+    rows = s.scalars(select(Outbox).where(Outbox.status == "queued", Outbox.channel == "telegram").order_by(Outbox.created_at).limit(limit)).all()
     own = client is None
     client = client or httpx.Client(timeout=20)
     try:

@@ -226,18 +226,14 @@ def dispatch(order_ref: str, body: DispatchIn, user: User = Depends(current_user
 
 
 class ReleaseIn(BaseModel):
-    order_ref: str
     approved: bool
-    approver: str
 
 
-@app.post("/webhooks/cash/release")
-def cash_release(body: ReleaseIn, x_omai_secret: str = Header(default=""), s: Session = Depends(db)) -> dict:
-    """CASH (or the designated approver) sends release authorisation here."""
-    secret = settings.cash_webhook_secret.get_secret_value()
-    if not secret or not hmac.compare_digest(x_omai_secret, secret):
-        raise HTTPException(403)
-    o = guard(warehouse.set_release, s, body.order_ref, body.approved, f"CASH:{body.approver}")
+@app.post("/orders/{order_ref}/release")
+def release(order_ref: str, body: ReleaseIn, user: User = Depends(need(Role.accountant, Role.owner)),
+            s: Session = Depends(db)) -> dict:
+    """Release authorisation by the designated approver (CASH's role), logged in — no extra webhook secret."""
+    o = guard(warehouse.set_release, s, order_ref, body.approved, f"{user.role}:{user.id}")
     return {"order_ref": o.order_ref, "release_status": o.release_status}
 
 
@@ -405,11 +401,9 @@ def approval_decide(aid: str, body: DecideIn, user: User = Depends(need(*APPROVE
 @app.post("/approvals/{aid}/execute")
 def approval_execute(aid: str, user: User = Depends(need(Role.manager, Role.accountant, Role.owner)),
                      s: Session = Depends(db)) -> dict:
-    from omai.connectors.sap_b1 import SapPoster
-
     a = s.get(Approval, aid)
     c = _count(s, a.payload["count_id"])
-    return guard(counting.apply_adjustment, s, c, a, user, poster=SapPoster(s))
+    return guard(counting.apply_adjustment, s, c, a, user, poster=None)  # IT posts the approved document in SAP and confirms
 
 
 @app.post("/counts/{cid}/close")
@@ -444,7 +438,7 @@ def dashboard(user: User = Depends(need(Role.manager, Role.accountant, Role.owne
 async def sap_push(request: Request, x_omai_secret: str = Header(default=""), s: Session = Depends(db)) -> dict:
     from omai.connectors.sap_b1 import SapError, ingest_payload
 
-    secret = settings.sap_push_secret.get_secret_value()
+    secret = settings.sap_push_webhook_secret.get_secret_value()
     if not secret or not hmac.compare_digest(x_omai_secret, secret):
         raise HTTPException(403)
     try:
@@ -457,7 +451,7 @@ async def sap_push(request: Request, x_omai_secret: str = Header(default=""), s:
 async def telegram_webhook(secret: str, request: Request, s: Session = Depends(db)) -> dict[str, Any]:
     """Task buttons: ``t:<task id>:<start|help|problem|submit>``. Submit from Telegram only opens the workspace
     link — evidence (scans) is entered there."""
-    expected = settings.telegram_webhook_secret.get_secret_value()
+    expected = settings.derived_secret("telegram")
     if not expected or not hmac.compare_digest(secret, expected):
         raise HTTPException(403)
     upd = await request.json()

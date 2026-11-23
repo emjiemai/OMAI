@@ -2,7 +2,7 @@
 
 1C is compared, not booked: posted stock movements, returns, adjustments and balances are read so differences
 with SAP and the physical ledger show up. Finance confirms which 1C fields are authoritative; the entity names
-are therefore settings (defaults fit «Бухгалтерия для Узбекистана», the same base mgmg-agents reads):
+are constants in ``omai/config.py`` (defaults fit «Бухгалтерия для Узбекистана», the same base mgmg-agents reads):
 
 * ``ONEC_BALANCE_ENTITY`` — a stock balance virtual table, e.g.
   ``AccumulationRegister_ТоварыНаСкладах/Balance`` (trade configurations) or the accounting register
@@ -14,14 +14,13 @@ Inventory *values* (sums) are read only for permitted reviewers and never shown 
 
 from __future__ import annotations
 
-import os
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 from sqlalchemy.orm import Session
 
-from omai.config import settings
+from omai.config import ONEC_BALANCE_ENTITY, ONEC_ITEM_FIELD, ONEC_QTY_FIELD, ONEC_WAREHOUSE_FIELD, settings
 from omai.connectors.ingest import set_external_balance
 from omai.sources import mark_failure, mark_success
 
@@ -49,10 +48,7 @@ class OneC:
 
 
 def sync(s: Session, client: OneC | None = None) -> dict:
-    entity = os.getenv("ONEC_BALANCE_ENTITY", "AccumulationRegister_ТоварыНаСкладах/Balance")
-    f_item = os.getenv("ONEC_ITEM_FIELD", "Номенклатура_Key")
-    f_whs = os.getenv("ONEC_WAREHOUSE_FIELD", "Склад_Key")
-    f_qty = os.getenv("ONEC_QTY_FIELD", "КоличествоBalance")
+    entity, f_item, f_whs, f_qty = ONEC_BALANCE_ENTITY, ONEC_ITEM_FIELD, ONEC_WAREHOUSE_FIELD, ONEC_QTY_FIELD
     own = client is None
     try:
         client = client or OneC()

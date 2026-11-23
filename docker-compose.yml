@@ -8,7 +8,7 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql://omai:omai@db:5432/omai
-      RUN_SCHEDULER: "true"
+      ENVIRONMENT: production
     ports: [ "8000:8000" ]
     depends_on: [ db ]
 volumes: { pg: {} }

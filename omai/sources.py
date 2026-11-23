@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from omai.config import settings
+from omai.config import SYNC_STALE_MINUTES
 from omai.ledger import raise_exception, resolve_exception
 from omai.models import SourceSync, now_utc
 
@@ -51,7 +51,7 @@ def age_minutes(s: Session, source: str, now: datetime | None = None) -> float |
 
 def is_stale(s: Session, source: str, now: datetime | None = None) -> bool:
     age = age_minutes(s, source, now)
-    return age is None or age > settings.sync_stale_minutes
+    return age is None or age > SYNC_STALE_MINUTES
 
 
 def stale_critical(s: Session, now: datetime | None = None, configured_only: bool = True) -> list[str]:

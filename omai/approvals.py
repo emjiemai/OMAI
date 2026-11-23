@@ -13,7 +13,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from omai.config import settings
+from omai.config import ADJUSTMENT_LIMIT_ACCOUNTANT, ADJUSTMENT_LIMIT_MANAGER
 from omai.ledger import Line, StockError, audit, record
 from omai.models import APPROVER_ROLES, Approval, Role, User, now_utc
 
@@ -25,8 +25,8 @@ def _hash(action: str, payload: dict) -> str:
 
 
 def limit_for(role: Role) -> float:
-    return {Role.manager: settings.adjustment_limit_manager,
-            Role.accountant: settings.adjustment_limit_accountant,
+    return {Role.manager: ADJUSTMENT_LIMIT_MANAGER,
+            Role.accountant: ADJUSTMENT_LIMIT_ACCOUNTANT,
             Role.owner: float("inf")}.get(role, 0.0)
 
 

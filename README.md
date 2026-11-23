@@ -15,7 +15,7 @@ It never writes off stock, approves credit, disposes of goods, disciplines staff
 | --- | --- | --- |
 | every movement | validate the scan; refuse wrong serials, unavailable stock, frozen bins | `omai/warehouse.py`, `omai/ledger.py` |
 | every 5 min | reminders (one before, one after the deadline, inside shifts) and manager escalation; send the outbox | `omai/tasks.py`, `omai/notify.py` |
-| every 15 min | sync SAP / Billz / 1C; system mismatches, old holds, overdue transfers and receipts; recovery task to IT when a critical source is stale | `omai/routine.py`, `omai/connectors/` |
+| every 15 min | sync Billz / 1C (SAP arrives by the gateway push); system mismatches, old holds, overdue transfers and receipts; recovery task to IT when a critical source is stale | `omai/routine.py`, `omai/connectors/` |
 | 09:00 | opening, access and hazard checks → the location lead confirms or reports | `routine.opening` |
 | 09:15 | assign receiving, put-away, dispatch and due counts | `routine.assign` |
 | 11:00, 15:00 | progress review to each person | `routine.progress` |
@@ -27,11 +27,11 @@ Each scheduled slot is keyed (`jobs` table): a restart never runs a slot twice; 
 ## How it fits together
 
 ```
- SAP B1 Service Layer ──(read user)──┐                          ┌── Staff workspace (/)  — mobile, scanner-friendly
- SAP gateway push → POST /sap/push ──┤                          │   blind count form, Start / Need help / Problem / Submit
+ SAP gateway push → POST /sap/push ──┐                          ┌── Staff workspace (/)  — mobile, scanner-friendly
+                                     │                          │   blind count form, Start / Need help / Problem / Submit
  1C OData (GET only) ────────────────┼─▶ connectors/ingest ─▶ ledger (movements, Postgres) ─▶ tasks, counts, approvals
  Billz 2.0 (sales, returns, stock) ──┘   (authority + dedupe)   │
- CASH release → POST /webhooks/cash/release ────────────────────┤── Owner dashboard (/owner), Excel reports
+ Approver release → POST /orders/{ref}/release ───────────────────┤── Owner dashboard (/owner), Excel reports
  Telegram buttons → POST /telegram/webhook/{secret} ────────────┘── Outbox → Telegram, AIPRO, MIYA
 ```
 
@@ -67,8 +67,8 @@ accepted count (A weekly, B monthly, C quarterly; original deadlines kept).
 | --- | --- |
 | staff, custodian | scan, receive, move, count; see own tasks and own location's stock (no costs) |
 | checker | independent recounts, evaluate counts, record causes, request corrections |
-| manager | approve within `ADJUSTMENT_LIMIT_MANAGER`, accept work, approve returns to sale, manual release fallback |
-| accountant | approve within `ADJUSTMENT_LIMIT_ACCOUNTANT` |
+| manager | approve within `ADJUSTMENT_LIMIT_MANAGER` (constant in `omai/config.py`), accept work, approve returns to sale, manual release fallback |
+| accountant | approve within `ADJUSTMENT_LIMIT_ACCOUNTANT`; release orders |
 | owner | everything; receives owner-decision exceptions |
 | it | integrations, recovery tasks |
 
@@ -78,12 +78,12 @@ Nobody approves their own adjustment; costs and values are shown only to manager
 
 | System | How | Code |
 | --- | --- | --- |
-| SAP Business One | Service Layer (`/Login`, OData paging) with a **read** user; a separate **posting** user only for approved adjustments (`InventoryGenEntries/Exits`). Or the office gateway pushes to `/sap/push` (as in mgmg-agents). | `omai/connectors/sap_b1.py` |
-| 1C | OData, GET only; balances compared, never booked. Entity/field names are settings — finance confirms the authoritative fields. | `omai/connectors/onec.py` |
-| Billz 2.0 | `/v1/auth/login`, `/v1/product-general-table` by position (sales, returns → quarantine). Stock path is a setting — **verify with Billz for your plan**. | `omai/connectors/billz.py` |
-| CASH | release authorisation webhook | `POST /webhooks/cash/release` |
-| AIPRO, MIYA | outbox webhooks (stock facts, ageing; tasks) — minimum data, no salaries or supplier costs to staff | `omai/notify.py` |
-| Telegram | task messages with buttons | `omai/notify.py`, `/telegram/webhook/{secret}` |
+| SAP Business One | The office SAP gateway pushes stock and inventory documents to `/sap/push` (header `X-Omai-Secret: $SAP_PUSH_WEBHOOK_SECRET`), as in mgmg-agents. OMAI never posts to SAP: approved adjustments are posted by IT/accounting. | `omai/connectors/sap_b1.py` |
+| 1C | OData, GET only; balances compared, never booked. Entity/field names are constants in `omai/config.py` — finance confirms the authoritative fields. | `omai/connectors/onec.py` |
+| Billz 2.0 | `/v1/auth/login`, `/v1/product-general-table` by position (sales, returns → quarantine). Stock path is `BILLZ_STOCK_PATH` in `omai/config.py` — **verify with Billz for your plan**. | `omai/connectors/billz.py` |
+| Release approval | the accountant / owner (CASH's role) approves in OMAI | `POST /orders/{ref}/release` |
+| AIPRO, MIYA | rows in the shared `outbox` table (channel `aipro` / `miya`) for those agents to read — minimum data | `omai/notify.py` |
+| Telegram | task messages with buttons (`TELEGRAM_PRIMARY_BOT_TOKEN`) | `omai/notify.py`, `/telegram/webhook/{secret}` |
 
 ## Run it
 
@@ -96,7 +96,7 @@ cp .env.example .env
 .venv/bin/python -m pytest -q
 ```
 
-Deploy: Render Blueprint (`render.yaml`) — Postgres + one always-on API that runs the schedule. Or
+Deploy: Render Blueprint (`render.yaml`) — Postgres + one always-on API that runs the schedule, using the existing `mgmg-shared` environment group. Environment variables OMAI reads: see `.env.example` (nothing new). Or
 `docker compose up`.
 
 ## Acceptance tests (`tests/test_acceptance.py`)
@@ -114,8 +114,8 @@ Deploy: Render Blueprint (`render.yaml`) — Postgres + one always-on API that r
 ## Still to do before go-live
 
 * Fill the location & SKU mapping (SAP WhsCode, Billz shop id, 1C Ref_Key) and the ABC groups.
-* Confirm with SAP the installed Service Layer version, and create the two SAP users.
-* Confirm with finance which 1C register is authoritative; set `ONEC_*` names.
+* Add the stock and inventory-document tools to the SAP gateway and its push script.
+* Confirm with finance which 1C register is authoritative; set the `ONEC_*` constants.
 * Confirm the Billz stock endpoint for our plan.
 * Baseline count of the pilot warehouse, then one store transfer route; expand after acceptance.
 * Camera/sensor counting and ML ranking are not built: start with these rule-based controls, as the spec says.

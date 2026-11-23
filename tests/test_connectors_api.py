@@ -9,43 +9,6 @@ from sqlalchemy import select
 from omai.config import settings
 from omai.connectors import billz, sap_b1
 from omai.ledger import balance
-from omai.models import DispatchOrder, ExpectedReceipt, ExternalBalance, Location
-
-
-def test_sap_service_layer_sync(s, monkeypatch):
-    monkeypatch.setattr(settings, "sap_sl_url", "https://sap.test/b1s/v1")
-    monkeypatch.setattr(settings, "sap_company_db", "EMJIEM")
-    monkeypatch.setattr(settings, "sap_read_user", "omai_read")
-    s.get(Location, "WH1").movement_source = "sap"
-    calls = []
-
-    def handler(req: httpx.Request) -> httpx.Response:
-        path = req.url.path.split("/b1s/v1/")[-1]
-        calls.append(path)
-        if path == "Login":
-            return httpx.Response(200, json={"SessionId": "x"})
-        data = {
-            "Items": [{"ItemCode": "TAN1", "ItemName": "Tanita", "ManageSerialNumbers": "tNO",
-                       "ManageBatchNumbers": "tNO", "ItemWarehouseInfoCollection": [
-                           {"WarehouseCode": "01", "InStock": 7}]}],
-            "PurchaseDeliveryNotes": [{"DocEntry": 5, "DocNum": 105, "DocDate": "2026-11-20",
-                                       "DocumentLines": [{"LineNum": 0, "ItemCode": "TAN1", "Quantity": 7,
-                                                          "WarehouseCode": "01"}]}],
-            "Orders": [{"DocNum": 9, "CardName": "Hotel", "DocumentLines": [
-                {"ItemCode": "TAN1", "Quantity": 2, "RemainingOpenQuantity": 2, "WarehouseCode": "01"}]}],
-            "PurchaseOrders": [{"DocNum": 3, "DocDueDate": "2026-11-25", "DocumentLines": [
-                {"ItemCode": "TAN1", "Quantity": 12, "RemainingOpenQuantity": 12, "WarehouseCode": "01"}]}],
-        }.get(path, [])
-        return httpx.Response(200, json={"value": data})
-
-    sl = sap_b1.ServiceLayer(transport=httpx.MockTransport(handler))
-    sap_b1.sync(s, sl)
-    sap_b1.sync(s, sl)                    # second run: nothing doubles
-    assert balance(s, sku="TANITA1", loc="WH1") == 7
-    assert s.scalar(select(ExternalBalance)).qty == 7
-    assert s.scalar(select(DispatchOrder)).order_ref == "SO9"
-    assert s.scalar(select(ExpectedReceipt)).qty_expected == 12
-    assert calls[0] == "Login"
 
 
 def test_sap_gateway_push(s):

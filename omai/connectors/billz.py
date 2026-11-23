@@ -6,7 +6,7 @@ Documented and used in production by mgmg-agents (docs.billz.io, read 2026-10-01
 (``order_id``, ``order_number``, ``shop_id``, ``product_sku``/``product_barcode``,
 ``net_sold_measurement_value`` — negative for returns). 2 requests/second.
 
-Stock per shop: the path is a setting (``BILLZ_STOCK_PATH``, default ``/v2/products``) — **verify with Billz for
+Stock per shop: the path is ``BILLZ_STOCK_PATH`` in ``omai/config.py`` (, default ``/v2/products``) — **verify with Billz for
 your plan** before relying on it (the spec requires vendor verification).
 
 Each cheque line becomes a ``sale`` / ``sale_return`` keyed by the Billz order id. A store whose
@@ -16,7 +16,6 @@ booked, so the sale never counts twice.
 
 from __future__ import annotations
 
-import os
 import time
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -24,7 +23,7 @@ from typing import Any
 import httpx
 from sqlalchemy.orm import Session
 
-from omai.config import settings
+from omai.config import BILLZ_BASE_URL, BILLZ_STOCK_PATH, settings
 from omai.connectors.ingest import Doc, DocLine, ingest, set_external_balance
 from omai.models import Location
 from omai.sources import mark_failure, mark_success
@@ -40,7 +39,7 @@ class Billz:
     def __init__(self, transport: httpx.BaseTransport | None = None, pause: float = PAUSE) -> None:
         if not settings.billz_configured:
             raise BillzError("Billz is not configured (BILLZ_SECRET_TOKEN)")
-        self.http = httpx.Client(base_url=settings.billz_base_url, timeout=60, transport=transport)
+        self.http = httpx.Client(base_url=BILLZ_BASE_URL, timeout=60, transport=transport)
         self.token: str | None = None
         self.pause = pause
 
@@ -137,7 +136,7 @@ def sync(s: Session, client: Billz | None = None, days: int = 2) -> dict:
             for doc in docs_from_positions(client.positions(day, shops), day):
                 stats["sales_docs"] += 1
                 stats["booked"] += ingest(s, doc)["booked"]
-        stock_path = os.getenv("BILLZ_STOCK_PATH", "/v2/products")
+        stock_path = BILLZ_STOCK_PATH
         if stock_path and shops:
             try:
                 for p in client.pages(stock_path, {}, "products"):

@@ -3,7 +3,7 @@ failed slot is retried.
 
 | When              | What |
 | every 5 min       | reminders / escalations, send the outbox |
-| every 15 min      | sync SAP / Billz / 1C, duplicates & holds, overdue transfers and receipts, system mismatches |
+| every 15 min      | sync Billz / 1C (SAP arrives by the gateway push), duplicates & holds, overdue transfers and receipts, system mismatches |
 | 09:00             | opening, access and hazard checks → the warehouse lead confirms or reports |
 | 09:15             | assign receiving, put-away, dispatch and due counts |
 | 11:00, 15:00      | progress review: open tasks to each person, pending transfer receipts |
@@ -79,10 +79,10 @@ def every_5(s: Session) -> dict:
 
 
 def every_15(s: Session) -> dict:
-    from omai.connectors import billz, onec, sap_b1
+    from omai.connectors import billz, onec
 
     out: dict = {}
-    for name, ok, fn in (("sap", settings.sap_configured, sap_b1.sync), ("billz", settings.billz_configured,
+    for name, ok, fn in (("billz", settings.billz_configured,
                                                                           billz.sync),
                          ("1c", settings.onec_configured, onec.sync)):
         if not ok:

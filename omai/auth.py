@@ -28,7 +28,7 @@ def check_pin(pin: str, stored: str | None) -> bool:
 
 
 def _sign(data: bytes) -> str:
-    return hmac.new(settings.session_secret.get_secret_value().encode(), data, hashlib.sha256).hexdigest()
+    return hmac.new(settings.derived_secret("session").encode(), data, hashlib.sha256).hexdigest()
 
 
 def issue(user_id: str) -> str:

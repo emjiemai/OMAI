@@ -318,8 +318,11 @@ def count_start(cid: str, user: User = Depends(current_user), s: Session = Depen
 
 @app.get("/counts/{cid}/form")
 def count_form(cid: str, user: User = Depends(current_user), s: Session = Depends(db)) -> list[dict]:
-    """The blind form: no expected quantities, for anyone."""
-    return counting.blind_form(_count(s, cid))
+    """The blind form: no expected quantities, for anyone. Opening it starts the count (records the cutoff)."""
+    c = _count(s, cid)
+    if c.status == "open" and user.id == c.counter_id:
+        counting.start(s, c)
+    return counting.blind_form(c)
 
 
 class CountEntries(BaseModel):
@@ -454,26 +457,7 @@ async def telegram_webhook(secret: str, request: Request, s: Session = Depends(d
     expected = settings.derived_secret("telegram")
     if not expected or not hmac.compare_digest(secret, expected):
         raise HTTPException(403)
-    upd = await request.json()
-    cq = upd.get("callback_query")
-    if not cq:
-        return {"ok": True}
-    chat = str(cq["from"]["id"])
-    user = s.scalar(select(User).where(User.telegram_chat_id == chat, User.active.is_(True)))
-    try:
-        _, tid, action = cq["data"].split(":", 2)
-    except ValueError:
-        return {"ok": True}
-    task = s.get(Task, tid)
-    if user is None or task is None:
-        return {"ok": True}
-    if action == "submit":
-        from omai.notify import tell
-        tell(s, user, f"Open the workspace to scan and submit: /?task={tid}")
-        return {"ok": True}
-    try:
-        tasks.act(s, task, action, user)
-    except tasks.TaskError as exc:
-        from omai.notify import tell
-        tell(s, user, str(exc))
+    from omai.telegram_bot import handle_update
+
+    handle_update(s, await request.json())
     return {"ok": True}

@@ -89,11 +89,23 @@ def act(s: Session, task: Task, action: str, actor: User, note: str = "", eviden
         tell(s, mgr, f"⚠ <b>{actor.name}</b>: {action} on «{task.title}»\n{note}", dedupe_key=None)
     task.state = target.value
     task.updated_at = now_utc()
+    if action == "start" and task.kind == "count" and task.ref and task.ref.startswith("count:"):
+        _start_count(s, task.ref.split(":", 1)[1])
     audit(s, actor.id, f"task.{action}", task.id, note=note)
     if action == "accept":
         assignee = s.get(User, task.assignee_id) if task.assignee_id else None
         tell(s, assignee, f"✅ Thank you — «{task.title}» is accepted.", dedupe_key=f"task:{task.id}:thanks")
     return task
+
+
+def _start_count(s: Session, count_id: str) -> None:
+    """Starting a count task records the cutoff (the moment counting begins)."""
+    from omai import counting
+    from omai.models import Count
+
+    c = s.get(Count, count_id)
+    if c is not None and c.status == "open":
+        counting.start(s, c)
 
 
 def reschedule(s: Session, task: Task, new_deadline: datetime, actor: User, reason: str) -> Task:

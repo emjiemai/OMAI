@@ -25,6 +25,9 @@ ONEC_ITEM_FIELD = "Номенклатура_Key"
 ONEC_WAREHOUSE_FIELD = "Склад_Key"
 ONEC_QTY_FIELD = "КоличествоBalance"
 
+# --- where staff open the workspace from Telegram (the Render URL once deployed) ---
+WORKSPACE_URL = "http://localhost:8000"
+
 # --- Billz ---
 BILLZ_BASE_URL = "https://api-admin.billz.ai"
 BILLZ_STOCK_PATH = "/v2/products"   # verify with Billz for our plan

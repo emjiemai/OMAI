@@ -99,6 +99,41 @@ cp .env.example .env
 Deploy: Render Blueprint (`render.yaml`) — Postgres + one always-on API that runs the schedule, using the existing `mgmg-shared` environment group. Environment variables OMAI reads: see `.env.example` (nothing new). Or
 `docker compose up`.
 
+## Test it locally (before production)
+
+Nothing here touches production: a local SQLite file, demo data, and a separate **test** Telegram bot.
+
+1. Create a test bot in @BotFather. Put its token in a local `.env` as `TELEGRAM_PRIMARY_BOT_TOKEN`, and add
+   `ENVIRONMENT=development`. Do **not** use a production bot's token: the polling loop stops if Telegram says the
+   bot already belongs to a server.
+2. Load the demo data. The demo logins and PINs are listed at the top of `scripts/demo.py`.
+
+   ```bash
+   .venv/bin/python -m scripts.demo
+   ```
+3. Start the web app: the staff workspace is http://localhost:8000 and the owner dashboard is
+   http://localhost:8000/owner.
+
+   ```bash
+   .venv/bin/uvicorn omai.api.app:app --port 8000
+   ```
+4. In another terminal, start the Telegram test loop. It handles messages and buttons, sends reminders, and needs
+   no public URL.
+
+   ```bash
+   .venv/bin/python -m omai.telegram_bot
+   ```
+5. In Telegram, open the test bot and send `/login otabek <PIN>`, then `/tasks`. Press Start, Need help or
+   Report problem. Submit sends a link to the workspace, where the blind count form is.
+6. To run the scheduled steps by hand (09:00 opening, 09:15 assign, 17:50 digest):
+
+   ```bash
+   .venv/bin/python -c "from omai.routine import run_now; print(run_now('closing'))"
+   ```
+
+To start again from scratch, delete `omai.db` and repeat step 2. `WORKSPACE_URL` in `omai/config.py` is
+`http://localhost:8000`, so the Submit link opens only on the computer running the app.
+
 ## Acceptance tests (`tests/test_acceptance.py`)
 
 1. Receive 10 against 12 → 10 received, 2 outstanding; damaged quarantined.

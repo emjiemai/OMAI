@@ -400,3 +400,12 @@ def test_freeze_blocks_movements_during_count(s, u):
     with pytest.raises(StockError, match="frozen"):
         warehouse.change_condition(s, sku="TANITA1", qty=1, location="WH1", bin_="G01", to="damaged",
                                    actor=u["otabek"], ref="dmg1")
+
+
+def test_serial_lines_match_their_own_serial(s, u):
+    _serial_stock(s, u)
+    c = counting.create(s, location="WH1", counter=u["otabek"], checker=u["chk"],
+                        deadline=now_utc() + timedelta(hours=1), skus=["FENIX8"], bins=["G01"])
+    counting.start(s, c)
+    counting.submit(s, c, u["otabek"], [{"line_id": l.id, "qty": 1, "serials": [l.lot]} for l in c.lines])
+    assert counting.evaluate(s, c)["recount"] == 0

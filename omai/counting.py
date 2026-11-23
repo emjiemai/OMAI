@@ -158,7 +158,7 @@ def _book(s: Session, count: Count, line: CountLine) -> float:
 
 def _book_serials(s: Session, count: Count, line: CountLine) -> set[str]:
     return {p["lot"] for p in positions(s, sku=line.sku, loc=count.location_code, at=count.cutoff_at)
-            if p["bin"] == line.bin and p["qty"] > 0 and p["lot"]}
+            if p["bin"] == line.bin and p["qty"] > 0 and p["lot"] and (not line.lot or p["lot"] == line.lot)}
 
 
 def material(diff: float, unit_cost: float) -> bool:

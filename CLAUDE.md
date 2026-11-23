@@ -1,5 +1,28 @@
-# OMAI — rules that must not be undone
+# OMAI — read this first
 
+OMAI (Virtual Warehouse Manager) is a new service next to the company's running system **mgmg-agents**
+(`/home/ulugbekai/Projects/mgm-command-centre`, its own `CLAUDE.md`). Same owner, same Render workspace, same
+`mgmg-shared` env group, same SAP / 1C / Billz. **The backend facts (how data really arrives, entity names,
+warehouse codes, limits, what OMAI's code gets wrong today) are in `docs/backend.md`, loaded below.** Read it before
+touching a connector, and check the mgmg-agents code before guessing anything about SAP, 1C, Billz or Telegram.
+
+@docs/backend.md
+
+## How to work with me
+- **Don't guess — verify.** Read the code, the docs, mgmg-agents, or the live API (read-only) before claiming anything.
+  Results first, short.
+- Every bot and user-facing text is **Uzbek Cyrillic**, polite «сиз». Code, comments, docs and commits are in English.
+- **Never touch the company's bots.** Admin Bot and OPS Manager Bot belong to mgmg-api (webhooks). OMAI uses its own
+  bot token.
+- Production checks are **read-only** (`default_transaction_read_only=on`). Print counts and error types only, never
+  figures, names or secrets.
+- **SAP:** never connect to HANA directly or ask for its credentials. Data leaves SAP only through the gateway's
+  fixed tools.
+- **1C** is GET-only: at most 3 reads at once, catalogs cached.
+- Open design decisions are the owner's. Examples: how SAP data reaches OMAI, the 1C ↔ SAP item mapping, which bot
+  OMAI uses. Write the options, don't pick one in code.
+
+## Rules that must not be undone
 - Stock changes only through `ledger.record` (movements with a unique `idem_key`). Never add an editable quantity column.
 - One authoritative system per location (`Location.movement_source`); the others are compared via `external_balances`.
   Conflicts open an exception — never average, never "fix" stock to make systems agree.

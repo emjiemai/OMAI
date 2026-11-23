@@ -100,7 +100,7 @@ def poll() -> None:
     offset = 0
     with httpx.Client(timeout=40) as http:
         me = http.get(f"{base}/getMe").json()
-        print(f"Polling as @{me.get('result', {}).get('username')} — Ctrl+C to stop")
+        print(f"Polling as @{me.get('result', {}).get('username')} — Ctrl+C to stop", flush=True)
         while True:
             r = http.get(f"{base}/getUpdates", params={"offset": offset, "timeout": 25})
             if r.status_code == 409:

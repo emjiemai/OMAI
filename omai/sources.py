@@ -37,7 +37,7 @@ def mark_failure(s: Session, source: str, error: str, at: datetime | None = None
     row.last_error = error[:1000]
     row.failures += 1
     if row.failures >= 2:
-        raise_exception(s, "source_down", source, f"{source} sync failing ({row.failures}×): {error[:200]}",
+        raise_exception(s, "source_down", source, f"{source} синхронлаш ишламаяпти ({row.failures}×): {error[:200]}",
                         severity="high" if row.critical else "medium")
 
 

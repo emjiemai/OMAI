@@ -335,7 +335,7 @@ def test_8_outage_shows_stale_and_blocks_release_with_manual_fallback(s, u):
     s.flush()
     routine.every_15(s)
     assert s.scalar(select(Task).where(Task.ref == "recover:sap"))
-    assert "stale" in routine.digest(s).lower()
+    assert "эскирган" in routine.digest(s).lower()
     # controlled manual fallback: a manager, not the picker
     with pytest.raises(StockError):
         warehouse.dispatch(s, order_ref="SO1", actor=u["otabek"], handover={"received_by": "C"},

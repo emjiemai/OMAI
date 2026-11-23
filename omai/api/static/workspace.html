@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="uz-Cyrl">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OMAI Workspace</title>
+<title>OMAI — иш саҳифаси</title>
 <style>
   :root { --bg:#f6f7f9; --card:#fff; --ink:#16181d; --muted:#667085; --line:#e4e7ec; --accent:#1f6feb; --bad:#c4321c; --ok:#127a43; }
   @media (prefers-color-scheme: dark) { :root { --bg:#111317; --card:#1a1d23; --ink:#e8eaee; --muted:#98a2b3; --line:#2a2f38; --accent:#5b9bff; --bad:#ff7a66; --ok:#4cc38a; } }
@@ -25,6 +25,8 @@
 <header><b>OMAI</b><span id="who" class="muted"></span></header>
 <main id="app"></main>
 <script>
+const STATE_UZ = {assigned: 'берилган', in_progress: 'бажарилмоқда', blocked: 'тўхтаган', submitted: 'топширилган', accepted: 'қабул қилинган', recount_required: 'қайта санаш керак', cancelled: 'бекор қилинган'};
+
 const $ = (h) => { const d = document.createElement('div'); d.innerHTML = h; return d; };
 let token = null; try { token = sessionStorage.getItem('omai'); } catch (e) {}
 const app = document.getElementById('app');
@@ -37,10 +39,10 @@ async function api(path, opts = {}) {
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 function loginView() {
-  app.innerHTML = `<div class="card"><h3>Sign in</h3>
-    <input id="l" placeholder="Login" autocomplete="username"><br><br>
+  app.innerHTML = `<div class="card"><h3>Кириш</h3>
+    <input id="l" placeholder="Логин" autocomplete="username"><br><br>
     <input id="p" placeholder="PIN" type="password" inputmode="numeric" autocomplete="current-password"><br>
-    <button class="primary" id="go">Sign in</button> <span id="err" class="over"></span></div>`;
+    <button class="primary" id="go">Кириш</button> <span id="err" class="over"></span></div>`;
   document.getElementById('go').onclick = async () => {
     try {
       const r = await fetch('/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ login: l.value, pin: p.value }) });
@@ -55,15 +57,15 @@ function loginView() {
 async function tasksView() {
   let list;
   try { list = await api('/me/tasks'); } catch (e) { return loginView(); }
-  app.innerHTML = list.length ? '' : '<div class="card muted">No open tasks. Thank you.</div>';
+  app.innerHTML = list.length ? '' : '<div class="card muted">Очиқ топшириқ йўқ. Раҳмат.</div>';
   for (const t of list) {
     const due = new Date(t.deadline).toLocaleString([], { hour:'2-digit', minute:'2-digit', day:'2-digit', month:'2-digit' });
     const c = $(`<div class="card"><b>${esc(t.title)}</b>
-      <div class="muted">${esc(t.location || '')} · due ${due} ${t.overdue ? '<span class="over">overdue</span>' : ''} · ${esc(t.state)}</div>
+      <div class="muted">${esc(t.location || '')} · муддат ${due} ${t.overdue ? '<span class="over">муддати ўтган</span>' : ''} · ${esc(STATE_UZ[t.state] || t.state)}</div>
       <div class="muted">${esc(t.result_required)}</div>
       <div>
-        <button data-a="start">Start</button><button data-a="help">Need help</button>
-        <button data-a="problem">Report problem</button><button class="primary" data-a="submit">Submit</button>
+        <button data-a="start">Бошлаш</button><button data-a="help">Ёрдам керак</button>
+        <button data-a="problem">Муаммо</button><button class="primary" data-a="submit">Топшириш</button>
       </div></div>`);
     c.querySelectorAll('button').forEach(b => b.onclick = () => act(t, b.dataset.a));
     app.appendChild(c);
@@ -86,13 +88,13 @@ async function countView(t) {
   const cid = t.ref.split(':')[1];
   const form = await api(`/counts/${cid}/form`);
   app.innerHTML = `<div class="card"><b>${esc(t.title)}</b>
-    <p class="muted">Enter what you see. <b>0</b> = counted empty. Leave blank only if you did not count it.
+    <p class="muted">Кўрганингизни ёзинг. <b>0</b> = санадим, бўш. Фақат санамаган бўлсангиз бўш қолдиринг.
     Scan serials separated by spaces.</p>
-    <table>${form.map(f => `<tr><td>${esc(f.bin)}</td><td>${esc(f.sku === '*' ? '(should be empty)' : f.sku)} ${esc(f.lot)}</td>
-      <td><input data-line="${f.line_id}" inputmode="decimal"></td><td><input data-serials="${f.line_id}" placeholder="serials"></td></tr>`).join('')}</table>
-    <p class="muted">Found something not on the list? Bin, SKU, qty:</p>
+    <table>${form.map(f => `<tr><td>${esc(f.bin)}</td><td>${esc(f.sku === '*' ? '(бўш бўлиши керак)' : f.sku)} ${esc(f.lot)}</td>
+      <td><input data-line="${f.line_id}" inputmode="decimal"></td><td><input data-serials="${f.line_id}" placeholder="серия рақамлари"></td></tr>`).join('')}</table>
+    <p class="muted">Рўйхатда йўқ нарса топдингизми? Ячейка, артикул, миқдор:</p>
     <input id="extra" placeholder="G01 GARMIN-123 2">
-    <button class="primary" id="send">Submit count</button> <button id="back">Back</button></div>`;
+    <button class="primary" id="send">Санашни топшириш</button> <button id="back">Орқага</button></div>`;
   document.getElementById('back').onclick = tasksView;
   document.getElementById('send').onclick = async () => {
     const entries = form.map(f => {

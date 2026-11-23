@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from omai.ledger import KIND_UZ
 from omai import approvals, auth, counting, insights, tasks, warehouse
 from omai.config import settings
 from omai.db import SessionLocal, init_db
@@ -51,14 +52,14 @@ def current_user(authorization: str = Header(default=""), s: Session = Depends(d
     uid = auth.verify(token) if token else None
     user = s.get(User, uid) if uid else None
     if user is None or not user.active:
-        raise HTTPException(401, "log in")
+        raise HTTPException(401, "тизимга киринг")
     return user
 
 
 def need(*roles: Role):
     def dep(user: User = Depends(current_user)) -> User:
         if Role(user.role) not in roles:
-            raise HTTPException(403, f"needs role: {', '.join(r.value for r in roles)}")
+            raise HTTPException(403, f"лавозим керак: {', '.join(r.value for r in roles)}")
         return user
     return dep
 
@@ -104,7 +105,7 @@ class LoginIn(BaseModel):
 def login(body: LoginIn, s: Session = Depends(db)) -> dict:
     user = s.scalar(select(User).where(User.login == body.login, User.active.is_(True)))
     if user is None or not auth.check_pin(body.pin, user.pin_hash):
-        raise HTTPException(401, "wrong login or PIN")
+        raise HTTPException(401, "логин ёки PIN нотўғри")
     return {"token": auth.issue(user.id), "user": {"id": user.id, "name": user.name, "role": user.role}}
 
 
@@ -426,7 +427,7 @@ def dashboard(user: User = Depends(need(Role.manager, Role.accountant, Role.owne
     return {
         "measures": insights.measures(s, user),
         "sources": freshness(s),
-        "exceptions": [{"id": e.id, "kind": e.kind, "severity": e.severity, "detail": e.detail, "ref": e.ref,
+        "exceptions": [{"id": e.id, "kind": e.kind, "kind_label": KIND_UZ.get(e.kind, e.kind), "severity": e.severity, "detail": e.detail, "ref": e.ref,
                         "owner_decision": e.owner_decision, "created_at": e.created_at.isoformat()} for e in ex],
         "tasks": [task_json(t) for t in due],
         "ageing": [r if show_cost else {k: v for k, v in r.items() if k != "value"} for r in insights.ageing(s)],
@@ -437,12 +438,30 @@ def dashboard(user: User = Depends(need(Role.manager, Role.accountant, Role.owne
 
 
 # ----------------------------------------------------------------- integrations
+def _sap_secret_ok(given: str) -> bool:
+    secret = settings.sap_push_webhook_secret.get_secret_value()
+    return bool(secret) and hmac.compare_digest(given, secret)
+
+
+@app.post("/sap/data/{kind}")
+async def sap_data(kind: str, request: Request, x_omai_secret: str = Header(default=""),
+                   s: Session = Depends(db)) -> dict:
+    """The SAP gateway push (``push-ar-aging.ps1`` → ``$OmaiHost``): one tool's ``{"rows", "complete"}``."""
+    from omai.connectors.sap_b1 import SapError, ingest_kind
+
+    if not _sap_secret_ok(x_omai_secret):
+        raise HTTPException(403)
+    try:
+        return {"ok": True, **ingest_kind(s, kind, await request.json())}
+    except SapError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @app.post("/sap/push")
 async def sap_push(request: Request, x_omai_secret: str = Header(default=""), s: Session = Depends(db)) -> dict:
     from omai.connectors.sap_b1 import SapError, ingest_payload
 
-    secret = settings.sap_push_webhook_secret.get_secret_value()
-    if not secret or not hmac.compare_digest(x_omai_secret, secret):
+    if not _sap_secret_ok(x_omai_secret):
         raise HTTPException(403)
     try:
         return ingest_payload(s, await request.json())
@@ -455,7 +474,7 @@ async def telegram_webhook(secret: str, request: Request, s: Session = Depends(d
     """Task buttons: ``t:<task id>:<start|help|problem|submit>``. Submit from Telegram only opens the workspace
     link — evidence (scans) is entered there."""
     expected = settings.derived_secret("telegram")
-    if not expected or not hmac.compare_digest(secret, expected):
+    if not settings.telegram_configured or not expected or not hmac.compare_digest(secret, expected):
         raise HTTPException(403)
     from omai.telegram_bot import handle_update
 

@@ -40,7 +40,7 @@ guessing. Its `CLAUDE.md` and `docs/agent-specs/*.md` are the reference.
   - backups: `BACKUP_SECRET`, `BACKUP_PUBLIC_KEY`.
 - `DATABASE_URL` is **per service** (`fromDatabase`), not in the group, so OMAI's own database URL doesn't clash.
 - `fromGroup: mgmg-shared` hands OMAI **every** secret above. Read only what you need, and never log any of them.
-- **`TELEGRAM_PRIMARY_BOT_TOKEN` is NOT in the group.** See §6.
+- OMAI's own bot token `OMAI_TELEGRAM_BOT_TOKEN` is set on the OMAI service, not in the group. See §6.
 
 ## 3. SAP Business One
 
@@ -150,7 +150,7 @@ guessing. Its `CLAUDE.md` and `docs/agent-specs/*.md` are the reference.
   - `setWebhook` would silently steal every employee's messages;
   - `sendMessage` from OMAI would mix into their chats.
 - **OMAI needs its own bot** (@BotFather) and its own variable, set on the OMAI service, not in `mgmg-shared`.
-  `TELEGRAM_PRIMARY_BOT_TOKEN` doesn't exist in the group today.
+  OMAI refuses an Admin / OPS Manager token (`settings.telegram_token_is_company_bot`).
 - People's Telegram ids are in mgmg's `employees` table (with role, department, and ака/опа for the polite address).
   Reuse it only with the owner's decision.
 
@@ -162,14 +162,15 @@ guessing. Its `CLAUDE.md` and `docs/agent-specs/*.md` are the reference.
 - **AIPRO** (purchasing), **CASH** (release), **MIYA**: owner-spec agents. AIPRO / OMAI / AI phone operator plan:
   mgmg-agents `docs/plans/2026-11-09-new-specs-plan.md`.
 
-## Known gaps in OMAI's code (from the facts above — fix only with the owner)
+## OMAI against these facts (fixed 2026-11-23)
 
-1. `connectors/sap_b1.py` expects Service Layer JSON and a push to `/sap/push`. Real rows are HANA columns, pushed
-   only to mgmg-api, and carry no serials or batches. **Nothing arrives.**
-2. `config.ONEC_BALANCE_ENTITY = AccumulationRegister_ТоварыНаСкладах/Balance` doesn't exist. Use
-   `AccountingRegister_Хозрасчетный/Balance`, filtered to 29xx / 10xx / 28xx accounts, reading item and warehouse
-   from the subconto. There is no 1C ↔ SAP item mapping yet.
-3. `connectors/onec.py`: no read limit, no catalog cache, no `Balance(Period=…)`.
-4. `TELEGRAM_PRIMARY_BOT_TOKEN` is not in `mgmg-shared`, and OMAI must not use the company bots' tokens.
-5. `BILLZ_STOCK_PATH=/v2/products` is unverified. Sales reads should be one day per call, with past days kept.
-6. User-facing texts must be Uzbek Cyrillic (company rule).
+1. SAP: `POST /sap/data/{kind}` reads the gateway's own rows (HANA columns) for `stock_value`, `goods_receipts`,
+   `stock_transfers`, `inventory_moves`; the push script in mgmg-agents has `$OmaiHost` (off until filled in on the
+   gateway PC). Still missing from the gateway: serials / batches, deliveries ODLN, returns ORDN.
+2. 1C: `AccountingRegister_Хозрасчетный/Balance` on 29xx / 10xx / 28xx, item / склад by subconto type, item by
+   `onec_ref` or «Артикул» = SAP code (583 of 813 matched on 23.11), catalogs kept 30 min, «410» explained.
+   To do by hand: each location's `onec_ref`.
+3. Telegram: `OMAI_TELEGRAM_BOT_TOKEN` (OMAI's own bot, on the service only); a company bot's token is refused.
+4. Billz `/v2/products` checked live (23.11): `products[].shop_measurement_values[].active_measurement_value`.
+5. User-facing texts are Uzbek Cyrillic (task titles, reminders, buttons, refusals, exceptions, both pages); the
+   codes (states, kinds) stay English with labels `STATE_UZ`, `ACTION_UZ`, `KIND_UZ`.

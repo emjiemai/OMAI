@@ -17,5 +17,8 @@ services:
         fromDatabase: { name: omai-db, property: connectionString }
     # Secrets come from the existing shared environment group (the one mgmg-agents uses); OMAI reads only:
     # ENVIRONMENT, DRY_RUN, TZ, SAP_PUSH_WEBHOOK_SECRET, ONEC_ODATA_URL, ONEC_LOGIN, ONEC_PASSWORD,
-    # BILLZ_SECRET_TOKEN, TELEGRAM_PRIMARY_BOT_TOKEN.
+    # BILLZ_SECRET_TOKEN — plus the two company bot tokens, only to refuse them as OMAI's own (docs/backend.md §6).
       - fromGroup: mgmg-shared
+    # OMAI's own Telegram bot (@BotFather) — on this service only, never in mgmg-shared.
+      - key: OMAI_TELEGRAM_BOT_TOKEN
+        sync: false

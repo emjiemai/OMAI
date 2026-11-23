@@ -2,7 +2,7 @@
 
 In production the API's webhook calls ``handle_update``. For testing, ``python -m omai.telegram_bot`` polls
 Telegram itself (``getUpdates``) — no webhook, no public address. Use a **test bot** from @BotFather in your local
-``.env`` as ``TELEGRAM_PRIMARY_BOT_TOKEN``: if the token belongs to a bot that already has a webhook (a production
+``.env`` as ``OMAI_TELEGRAM_BOT_TOKEN``: if the token belongs to a bot that already has a webhook (a production
 bot), Telegram refuses polling with 409 and this loop stops instead of touching that bot.
 
 People link themselves once: ``/login <login> <PIN>`` (the PIN set with ``scripts.setup --pin``).
@@ -22,8 +22,8 @@ from omai.db import init_db, session_scope
 from omai.models import OPEN_TASK_STATES, Task, User
 from omai.notify import deliver_outbox, task_buttons, tell
 
-HELP = ("OMAI — warehouse tasks.\n/login &lt;login&gt; &lt;PIN&gt; — link this chat\n/tasks — my open tasks\n"
-        "/logout — unlink this chat")
+HELP = ("OMAI — омбор топшириқлари.\n/login &lt;логин&gt; &lt;PIN&gt; — шу чатни улаш\n/tasks — очиқ топшириқларим\n"
+        "/logout — чатни узиш")
 
 
 def _reply(s: Session, chat: str, text: str, buttons: list | None = None) -> None:
@@ -43,28 +43,28 @@ def handle_update(s: Session, upd: dict) -> None:
     cmd, *args = text.split()
     if cmd == "/login":
         if len(args) != 2:
-            return _reply(s, chat, "Send: /login &lt;login&gt; &lt;PIN&gt;")
+            return _reply(s, chat, "Илтимос, шундай юборинг: /login &lt;логин&gt; &lt;PIN&gt;")
         u = s.scalar(select(User).where(User.login == args[0], User.active.is_(True)))
         if u is None or not auth.check_pin(args[1], u.pin_hash):
-            return _reply(s, chat, "Wrong login or PIN.")
+            return _reply(s, chat, "Логин ёки PIN нотўғри.")
         for other in s.scalars(select(User).where(User.telegram_chat_id == chat)):
             other.telegram_chat_id = None
         u.telegram_chat_id = chat
-        return _reply(s, chat, f"Linked: {u.name} ({u.role}). /tasks shows your work.")
+        return _reply(s, chat, f"Уланди: {u.name} ({u.role}). Топшириқларингиз — /tasks.")
     if user is None:
         return _reply(s, chat, HELP)
     if cmd == "/logout":
         user.telegram_chat_id = None
-        return _reply(s, chat, "Unlinked.")
+        return _reply(s, chat, "Чат узилди.")
     if cmd == "/tasks":
         states = [st.value for st in OPEN_TASK_STATES]
         mine = s.scalars(select(Task).where(Task.assignee_id == user.id, Task.state.in_(states))
                          .order_by(Task.priority, Task.deadline)).all()
         if not mine:
-            return _reply(s, chat, "No open tasks. Thank you.")
+            return _reply(s, chat, "Очиқ топшириқ йўқ. Раҳмат.")
         for t in mine[:10]:
             due = t.deadline.astimezone(settings.tz).strftime("%H:%M %d.%m")
-            _reply(s, chat, f"<b>{t.title}</b>\nDue {due} · {t.state}{' · overdue' if tasks.is_overdue(t) else ''}",
+            _reply(s, chat, f"<b>{t.title}</b>\nМуддат {due} · {tasks.STATE_UZ.get(t.state, t.state)}{' · муддати ўтган' if tasks.is_overdue(t) else ''}",
                    task_buttons(t.id))
         return None
     return _reply(s, chat, HELP)
@@ -81,22 +81,24 @@ def _callback(s: Session, cq: dict) -> None:
     if user is None or task is None:
         return
     if action == "submit":
-        tell(s, user, f"Scan and submit in the workspace: {WORKSPACE_URL}/?task={tid}")
+        tell(s, user, f"Иш саҳифасида сканерлаб топширинг: {WORKSPACE_URL}/?task={tid}")
         return
     try:
         tasks.act(s, task, action, user)
-        tell(s, user, {"start": "▶ Started", "help": "🆘 Your manager is told",
-                       "problem": "⚠ Reported to your manager"}.get(action, "OK") + f": {task.title}")
+        tell(s, user, {"start": "▶ Бошланди", "help": "🆘 Менежерингизга айтилди",
+                       "problem": "⚠ Менежерингизга хабар берилди"}.get(action, "Бажарилди") + f": {task.title}")
     except tasks.TaskError as exc:
         tell(s, user, str(exc))
 
 
 def poll() -> None:
     """Test loop: read updates, handle them, run reminders, send the outbox. Ctrl+C to stop."""
+    if settings.telegram_token_is_company_bot:
+        raise SystemExit("OMAI_TELEGRAM_BOT_TOKEN is a company bot's token (Admin / OPS Manager) — use OMAI's own bot")
     if not settings.telegram_configured:
-        raise SystemExit("Set TELEGRAM_PRIMARY_BOT_TOKEN (a test bot) in .env")
+        raise SystemExit("Set OMAI_TELEGRAM_BOT_TOKEN (a test bot) in .env")
     init_db()
-    base = f"https://api.telegram.org/bot{settings.telegram_primary_bot_token.get_secret_value()}"
+    base = f"https://api.telegram.org/bot{settings.omai_telegram_bot_token.get_secret_value()}"
     offset = 0
     with httpx.Client(timeout=40) as http:
         me = http.get(f"{base}/getMe").json()

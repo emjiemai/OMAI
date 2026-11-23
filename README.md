@@ -27,7 +27,7 @@ Each scheduled slot is keyed (`jobs` table): a restart never runs a slot twice; 
 ## How it fits together
 
 ```
- SAP gateway push → POST /sap/push ──┐                          ┌── Staff workspace (/)  — mobile, scanner-friendly
+ SAP gateway push → POST /sap/data/{kind} ┐                     ┌── Staff workspace (/)  — mobile, scanner-friendly
                                      │                          │   blind count form, Start / Need help / Problem / Submit
  1C OData (GET only) ────────────────┼─▶ connectors/ingest ─▶ ledger (movements, Postgres) ─▶ tasks, counts, approvals
  Billz 2.0 (sales, returns, stock) ──┘   (authority + dedupe)   │
@@ -78,12 +78,12 @@ Nobody approves their own adjustment; costs and values are shown only to manager
 
 | System | How | Code |
 | --- | --- | --- |
-| SAP Business One | The office SAP gateway pushes stock and inventory documents to `/sap/push` (header `X-Omai-Secret: $SAP_PUSH_WEBHOOK_SECRET`), as in mgmg-agents. OMAI never posts to SAP: approved adjustments are posted by IT/accounting. | `omai/connectors/sap_b1.py` |
-| 1C | OData, GET only; balances compared, never booked. Entity/field names are constants in `omai/config.py` — finance confirms the authoritative fields. | `omai/connectors/onec.py` |
-| Billz 2.0 | `/v1/auth/login`, `/v1/product-general-table` by position (sales, returns → quarantine). Stock path is `BILLZ_STOCK_PATH` in `omai/config.py` — **verify with Billz for your plan**. | `omai/connectors/billz.py` |
+| SAP Business One | The office SAP gateway's push script (mgmg-agents `scripts/sap-gateway-push/push-ar-aging.ps1`, `$OmaiHost`) sends the rows of `stock_value`, `goods_receipts`, `stock_transfers`, `inventory_moves` to `POST /sap/data/{kind}` (header `X-Omai-Secret: $SAP_PUSH_WEBHOOK_SECRET`) — SAP's HANA column names as they are. A complete `stock_value` push zeroes what SAP no longer lists; cancellation documents undo their original. No serials / batches, deliveries or returns from the gateway yet. OMAI never posts to SAP. | `omai/connectors/sap_b1.py` |
+| 1C | OData, GET only; compared, never booked. This 1C has no trade stock register: stock = `AccountingRegister_Хозрасчетный/Balance` `КоличествоBalance` on accounts 29xx / 10xx / 28xx (`ONEC_STOCK_ACCOUNTS`), item and склад read from the subconto by type. Item → OMAI by `Item.onec_ref`, else 1C «Артикул» = SAP `ItemCode`; склад by `Location.onec_ref`. Chart and catalog kept 30 min. | `omai/connectors/onec.py` |
+| Billz 2.0 | `/v1/auth/login`, `/v1/product-general-table` by position, one day per call (sales, returns → quarantine). Stock: `/v2/products` → `shop_measurement_values` (checked live 23.11.2026: 1451 products, `active_measurement_value` per shop). | `omai/connectors/billz.py` |
 | Release approval | the accountant / owner (CASH's role) approves in OMAI | `POST /orders/{ref}/release` |
 | AIPRO, MIYA | rows in the shared `outbox` table (channel `aipro` / `miya`) for those agents to read — minimum data | `omai/notify.py` |
-| Telegram | task messages with buttons (`TELEGRAM_PRIMARY_BOT_TOKEN`) | `omai/notify.py`, `/telegram/webhook/{secret}` |
+| Telegram | task messages with buttons — **OMAI's own bot** (`OMAI_TELEGRAM_BOT_TOKEN`, on the OMAI service only). The Admin / OPS Manager bots belong to mgmg-api: their tokens are refused. | `omai/notify.py`, `/telegram/webhook/{secret}` |
 
 ## Run it
 
@@ -103,7 +103,7 @@ Deploy: Render Blueprint (`render.yaml`) — Postgres + one always-on API that r
 
 Nothing here touches production: a local SQLite file, demo data, and a separate **test** Telegram bot.
 
-1. Create a test bot in @BotFather. Put its token in a local `.env` as `TELEGRAM_PRIMARY_BOT_TOKEN`, and add
+1. Create a test bot in @BotFather. Put its token in a local `.env` as `OMAI_TELEGRAM_BOT_TOKEN`, and add
    `ENVIRONMENT=development`. Do **not** use a production bot's token: the polling loop stops if Telegram says the
    bot already belongs to a server.
 2. Load the demo data. The demo logins and PINs are listed at the top of `scripts/demo.py`.
@@ -123,7 +123,7 @@ Nothing here touches production: a local SQLite file, demo data, and a separate 
    ```bash
    .venv/bin/python -m omai.telegram_bot
    ```
-5. In Telegram, open the test bot and send `/login otabek <PIN>`, then `/tasks`. Press Start, Need help or
+5. In Telegram, open the test bot and send `/login otabek <PIN>`, then `/tasks`. Press Бошлаш, Ёрдам керак or
    Report problem. Submit sends a link to the workspace, where the blind count form is.
 6. To run the scheduled steps by hand (09:00 opening, 09:15 assign, 17:50 digest):
 
@@ -149,8 +149,8 @@ To start again from scratch, delete `omai.db` and repeat step 2. `WORKSPACE_URL`
 ## Still to do before go-live
 
 * Fill the location & SKU mapping (SAP WhsCode, Billz shop id, 1C Ref_Key) and the ABC groups.
-* Add the stock and inventory-document tools to the SAP gateway and its push script.
-* Confirm with finance which 1C register is authoritative; set the `ONEC_*` constants.
+* SAP: copy the push script from mgmg-agents to the gateway PC and fill in `$OmaiHost`; for serials / batches, deliveries and returns a new gateway tool is needed (+ HANA SELECT grants).
+* 1C: set each location's `onec_ref` (the 1C склад `Ref_Key`); finance confirms `ONEC_STOCK_ACCOUNTS` and fixes the «Артикул» of items that don't carry the SAP code.
 * Confirm the Billz stock endpoint for our plan.
 * Baseline count of the pilot warehouse, then one store transfer route; expand after acceptance.
 * Camera/sensor counting and ML ranking are not built: start with these rule-based controls, as the spec says.

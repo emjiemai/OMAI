@@ -12,8 +12,125 @@ from omai.ledger import balance
 
 
 def test_sap_gateway_push(s):
-    out = sap_b1.ingest_payload(s, {"kind": "stock", "rows": [{"ItemCode": "TAN1", "WhsCode": "01", "OnHand": 4}]})
-    assert out["rows"] == 1
+    out = sap_b1.ingest_payload(s, {"kind": "stock_value", "rows": [{"ItemCode": "TAN1", "WhsCode": "01", "OnHand": 4}]})
+    assert out["rows"] == 1 and out["mapped"] == 1
+
+
+def test_sap_stock_complete_push_zeroes_what_sap_no_longer_lists(s):
+    from omai.models import ExternalBalance
+
+    rows = [{"ItemCode": "TAN1", "WhsCode": "01", "OnHand": 4}, {"ItemCode": "GAR-F8", "WhsCode": "01", "OnHand": 2}]
+    sap_b1.ingest_kind(s, "stock_value", {"rows": rows, "complete": True})
+    out = sap_b1.ingest_kind(s, "stock_value", {"rows": rows[:1], "complete": True})   # F8 sold out in SAP
+    qty = {b.sku: b.qty for b in s.scalars(select(ExternalBalance).where(ExternalBalance.source == "sap"))}
+    assert qty == {"TANITA1": 4, "FENIX8": 0} and out["zeroed"] == 1
+    sap_b1.ingest_kind(s, "stock_value", {"rows": [], "complete": False})                # a cut push changes nothing
+    assert s.scalar(select(ExternalBalance).where(ExternalBalance.sku == "TANITA1")).qty == 4
+
+
+def test_sap_gateway_rows_book_and_cancel(s):
+    """HANA rows (DocEntry / LineNum / WhsCode …), booked only where SAP is the location's authority; a
+    cancellation document ('C') undoes the original ('Y') whatever order they come in."""
+    from omai.models import Location
+
+    s.get(Location, "WH1").movement_source = "sap"
+    receipt = {"DocEntry": 55, "DocNum": 1055, "DocDate": "2026-11-20T00:00:00.000Z", "CANCELED": "N",
+               "LineNum": 0, "ItemCode": "TAN1", "Quantity": 5, "WhsCode": "01", "CardName": "Supplier"}
+    out = sap_b1.ingest_kind(s, "goods_receipts", {"rows": [receipt], "complete": True})
+    again = sap_b1.ingest_kind(s, "goods_receipts", {"rows": [receipt], "complete": True})
+    assert out["booked"] == 1 and again["booked"] == 0
+    assert balance(s, sku="TANITA1", loc="WH1", cond="saleable") == 5
+
+    issue = {"ObjType": 60, "DocEntry": 7, "DocNum": 7, "DocDate": "2026-11-21", "CANCELED": "Y",
+             "LineNum": 0, "ItemCode": "TAN1", "Quantity": 2, "WhsCode": "01"}
+    cancel = {**issue, "DocEntry": 8, "DocNum": 8, "CANCELED": "C"}
+    sap_b1.ingest_kind(s, "inventory_moves", {"rows": [cancel, issue], "complete": True})
+    assert balance(s, sku="TANITA1", loc="WH1", cond="saleable") == 5          # issued 2, cancelled: back to 5
+
+    transfer = {"DocEntry": 9, "DocNum": 9, "DocDate": "2026-11-21", "CANCELED": "N", "LineNum": 0,
+                "ItemCode": "TAN1", "Quantity": 1, "FromWhsCod": "01", "WhsCode": "G05"}
+    out = sap_b1.ingest_kind(s, "stock_transfers", {"rows": [transfer], "complete": True})
+    assert out["booked"] == 1 and balance(s, sku="TANITA1", loc="WH1", cond="saleable") == 4
+
+
+def test_sap_data_endpoint(s, monkeypatch):
+    from omai.api.app import app, db
+
+    monkeypatch.setattr(settings, "sap_push_webhook_secret", type(settings.sap_push_webhook_secret)("sec"))
+    app.dependency_overrides[db] = lambda: s
+    try:
+        c = TestClient(app)
+        body = {"rows": [{"ItemCode": "TAN1", "WhsCode": "01", "OnHand": 3}], "complete": False}
+        assert c.post("/sap/data/stock_value", json=body).status_code == 403
+        r = c.post("/sap/data/stock_value", json=body, headers={"X-Omai-Secret": "sec"})
+        assert r.status_code == 200 and r.json()["mapped"] == 1
+        assert c.post("/sap/data/sales", json=body, headers={"X-Omai-Secret": "sec"}).status_code == 400
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_onec_stock_from_the_accounting_register(s, monkeypatch):
+    """No trade registers in this 1C: stock = КоличествоBalance on 29xx / 10xx / 28xx, item and склад found by the
+    subconto's type; the item maps by Item.onec_ref, else «Артикул» = the SAP code; sums never read."""
+    from omai.connectors import onec
+    from omai.models import ExternalBalance, Location
+
+    monkeypatch.setattr(settings, "onec_odata_url", "https://1c.test/odata/")
+    monkeypatch.setattr(settings, "onec_login", "u")
+    onec._kept.clear()
+    s.get(Location, "WH1").onec_ref = "whs-main"
+    stock_acc, money_acc = "acc-2910", "acc-5110"
+
+    def row(acc, item, whs, qty):
+        return {"Account_Key": acc, "ExtDimension1": item, "ExtDimension1_Type": "StandardODATA.Catalog_Номенклатура",
+                "ExtDimension2": "doc", "ExtDimension2_Type": "StandardODATA.Document_ПоступлениеТоваровУслуг",
+                "ExtDimension3": whs, "ExtDimension3_Type": "StandardODATA.Catalog_Склады",
+                "КоличествоBalance": qty, "СуммаBalance": 999}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        path = req.url.path
+        if "ChartOfAccounts" in path:
+            return httpx.Response(200, json={"value": [{"Ref_Key": stock_acc, "Code": "2910"},
+                                                       {"Ref_Key": money_acc, "Code": "5110"}]})
+        if "Balance" in path:
+            assert "Period=datetime'" in path
+            return httpx.Response(200, json={"value": [
+                row(stock_acc, "item-tan", "whs-main", 3), row(stock_acc, "item-tan", "whs-main", 2),   # two batches
+                row(stock_acc, "item-x", "whs-main", 1),            # no Артикул match
+                row(stock_acc, "item-tan", "whs-other", 4),          # склад not mapped
+                row(money_acc, "item-tan", "whs-main", 50)]})        # not a stock account
+        if "Catalog_" in path:
+            return httpx.Response(200, json={"value": [{"Ref_Key": "item-tan", "Артикул": "TAN1"},
+                                                       {"Ref_Key": "item-x", "Артикул": ""}]})
+        return httpx.Response(404)
+
+    client = onec.OneC(transport=httpx.MockTransport(handler))
+    out = onec.sync(s, client)
+    b = s.scalar(select(ExternalBalance).where(ExternalBalance.source == "1c"))
+    assert (b.location_code, b.sku, b.qty) == ("WH1", "TANITA1", 5)
+    assert out["mapped"] == 1 and out["unmapped_items"] == 1 and out["unmapped_warehouses"] == 1
+
+
+def test_onec_410_says_what_to_do(monkeypatch):
+    from omai.connectors import onec
+
+    monkeypatch.setattr(settings, "onec_odata_url", "https://1c.test/odata/")
+    monkeypatch.setattr(settings, "onec_login", "u")
+    client = onec.OneC(transport=httpx.MockTransport(lambda r: httpx.Response(410)))
+    try:
+        client.get("ChartOfAccounts_Хозрасчетный")
+        raise AssertionError("410 must raise")
+    except onec.OneCError as exc:
+        assert "switched off in Clobus" in str(exc)
+
+
+def test_company_bot_token_is_refused(monkeypatch):
+    secret = type(settings.omai_telegram_bot_token)
+    monkeypatch.setattr(settings, "ops_manager_bot_telegram_bot_token", secret("111:company"))
+    monkeypatch.setattr(settings, "omai_telegram_bot_token", secret("111:company"))
+    assert settings.telegram_token_is_company_bot and not settings.telegram_configured
+    monkeypatch.setattr(settings, "omai_telegram_bot_token", secret("222:omai"))
+    assert settings.telegram_configured and not settings.telegram_token_is_company_bot
 
 
 def test_billz_sales_sync(s, monkeypatch):

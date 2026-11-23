@@ -18,6 +18,16 @@ from omai.models import (Allocation, AuditLog, Condition, Exception_, Movement, 
 TRANSIT = "TRANSIT"   # the transit location; a transfer's units sit in bin = transfer id
 
 
+# Exception kinds as people read them (Uzbek Cyrillic); the codes stay English.
+KIND_UZ = {"allocation_short": "банд қилишга етмади", "count_variance": "санашда фарқ",
+           "damaged_receipt": "шикастланган қабул", "erp_posting_pending": "SAP'га киритилмаган",
+           "expired_saleable": "муддати ўтган товар сотувда", "late_receipt": "кечиккан қабул",
+           "negative_stock": "манфий қолдиқ", "old_allocation": "эски банд", "over_receipt": "ортиқча қабул",
+           "release_blocked": "чиқариш тўхтатилди", "short_receipt": "кам қабул", "source_down": "манба ишламаяпти",
+           "system_mismatch": "тизимлар мос эмас", "transfer_incomplete": "кўчириш тугалланмаган",
+           "transfer_overdue": "кўчириш кечикди", "unmapped": "боғланмаган товар / жой"}
+
+
 class StockError(ValueError):
     """A movement that would break the ledger rules (not enough stock, wrong serial, ...)."""
 
@@ -187,23 +197,23 @@ def record(s: Session, *, idem_key: str, source: str, kind: str, lines: Iterable
 
     lines = list(lines)
     if not lines:
-        raise StockError("a movement needs at least one line")
+        raise StockError("ҳаракатда камида битта қатор бўлиши керак")
     for guard in GUARDS:
         guard(s, lines, source, kind)
     warnings: list[str] = []
     need: dict[tuple, float] = {}
     for ln in lines:
         if ln.qty <= 0:
-            raise StockError(f"{ln.sku}: quantity must be positive")
+            raise StockError(f"{ln.sku}: миқдор мусбат бўлиши керак")
         if ln.from_loc is None and ln.to_loc is None:
-            raise StockError(f"{ln.sku}: a line must leave or arrive somewhere")
+            raise StockError(f"{ln.sku}: қатор бирор жойдан чиқиши ёки бирор жойга кириши керак")
         if ln.from_loc is not None:
             key = (ln.sku, ln.from_loc, ln.from_bin, ln.from_cond, ln.lot, ln.ownership)
             need[key] = need.get(key, 0) + ln.qty
     for (sku, loc, bin_, cond, lot, own), qty in need.items():
         have = balance(s, sku=sku, loc=loc, bin_=bin_, cond=cond, lot=lot, ownership=own)
         if have + 1e-9 < qty:
-            msg = f"{sku} at {loc}/{bin_ or '-'} {cond} {lot or ''}: needs {qty:g}, holds {have:g}"
+            msg = f"{sku} {loc}/{bin_ or '-'} {cond} {lot or ''}: {qty:g} керак, бор-йўғи {have:g}"
             if strict:
                 raise StockError(msg)
             warnings.append(msg)
@@ -220,6 +230,6 @@ def record(s: Session, *, idem_key: str, source: str, kind: str, lines: Iterable
     s.flush()
     audit(s, actor, f"movement.{kind}", mv.id, idem_key=idem_key, source=source, lines=len(lines))
     for w in warnings:
-        raise_exception(s, "negative_stock", f"{mv.id}", f"{source} posted more than OMAI holds: {w}",
+        raise_exception(s, "negative_stock", f"{mv.id}", f"{source} OMAI'даги қолдиқдан кўп чиқарди: {w}",
                         severity="high", movement=mv.id)
     return Result(mv, created=True, warnings=warnings)

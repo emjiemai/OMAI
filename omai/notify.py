@@ -34,10 +34,10 @@ def tell(s: Session, user: User | None, text: str, buttons: list[list[dict]] | N
 
 
 def task_buttons(task_id: str) -> list[list[dict]]:
-    return [[{"text": "▶ Start", "callback_data": f"t:{task_id}:start"},
-             {"text": "🆘 Need help", "callback_data": f"t:{task_id}:help"}],
-            [{"text": "⚠ Report problem", "callback_data": f"t:{task_id}:problem"},
-             {"text": "✅ Submit", "callback_data": f"t:{task_id}:submit"}]]
+    return [[{"text": "▶ Бошлаш", "callback_data": f"t:{task_id}:start"},
+             {"text": "🆘 Ёрдам керак", "callback_data": f"t:{task_id}:help"}],
+            [{"text": "⚠ Муаммо", "callback_data": f"t:{task_id}:problem"},
+             {"text": "✅ Топшириш", "callback_data": f"t:{task_id}:submit"}]]
 
 
 def _send(client: httpx.Client, m: Outbox) -> None:
@@ -49,7 +49,7 @@ def _send(client: httpx.Client, m: Outbox) -> None:
         payload: dict = {"chat_id": m.to, "text": m.body["text"], "parse_mode": "HTML"}
         if m.body.get("buttons"):
             payload["reply_markup"] = {"inline_keyboard": m.body["buttons"]}
-        r = client.post(f"https://api.telegram.org/bot{settings.telegram_primary_bot_token.get_secret_value()}/sendMessage",
+        r = client.post(f"https://api.telegram.org/bot{settings.omai_telegram_bot_token.get_secret_value()}/sendMessage",
                         json=payload)
         r.raise_for_status()
     else:

@@ -79,7 +79,7 @@ def send_ageing_to_aipro(s: Session, now: datetime | None = None) -> int:
     for r in rows:
         if "expired" in r["flags"] and r["cond"] == "saleable":
             raise_exception(s, "expired_saleable", f"{r['loc']}:{r['bin']}:{r['sku']}:{r['lot']}",
-                            f"{r['qty']:g} × {r['sku']} at {r['loc']}/{r['bin']} past expiry but still saleable — "
+                            f"{r['qty']:g} × {r['sku']} {r['loc']}/{r['bin']} да муддати ўтган, лекин ҳали сотувда — "
                             f"move to expired", severity="high")
     return len(props)
 
@@ -96,7 +96,7 @@ def reconcile_systems(s: Session) -> list[dict]:
                  "diff": eb.qty - ours, "read_at": eb.read_at.isoformat()}
             diffs.append(d)
             raise_exception(s, "system_mismatch", ref,
-                            f"{eb.source} shows {eb.qty:g} × {eb.sku} at {eb.location_code}, OMAI ledger {ours:g}",
+                            f"{eb.source}: {eb.location_code} да {eb.qty:g} × {eb.sku}, OMAI журналида {ours:g}",
                             severity="medium", **d)
         else:
             resolve_exception(s, "system_mismatch", ref, "balances agree")
@@ -107,8 +107,8 @@ def check_holds(s: Session, older_than_days: int = 7) -> int:
     cutoff = now_utc() - timedelta(days=older_than_days)
     n = 0
     for a in s.scalars(select(Allocation).where(Allocation.status == "active", Allocation.created_at < cutoff)):
-        raise_exception(s, "old_allocation", a.id, f"{a.qty:g} × {a.sku} reserved for {a.order_ref} since "
-                                                   f"{a.created_at:%d.%m}", severity="low")
+        raise_exception(s, "old_allocation", a.id, f"{a.qty:g} × {a.sku} {a.order_ref} учун банд, "
+                                                   f"{a.created_at:%d.%m} дан бери", severity="low")
         n += 1
     return n
 
@@ -118,17 +118,17 @@ def check_transfers_and_receipts(s: Session, now: datetime | None = None) -> int
     n = 0
     for t in s.scalars(select(Transfer).where(Transfer.status.in_(["in_transit", "partial"]))):
         if t.due_at and _aware(t.due_at) < now:
-            raise_exception(s, "transfer_overdue", t.id, f"transfer {t.id[:8]} {t.from_loc}→{t.to_loc} not received "
-                                                         f"by {t.due_at:%d.%m %H:%M}", severity="medium")
+            raise_exception(s, "transfer_overdue", t.id, f"кўчириш {t.id[:8]} {t.from_loc}→{t.to_loc} "
+                                                         f"{t.due_at:%d.%m %H:%M} гача қабул қилинмади", severity="medium")
             n += 1
     for r in s.scalars(select(ExpectedReceipt).where(ExpectedReceipt.status.in_(["expected", "partial"]))):
         if r.due_at and _aware(r.due_at) < now:
             raise_exception(s, "late_receipt", f"{r.po_ref}:{r.sku}", f"{r.po_ref} {r.sku}: "
-                            f"{r.qty_expected - r.qty_received:g} still expected (due {r.due_at:%d.%m})")
+                            f"яна {r.qty_expected - r.qty_received:g} та кутилмоқда (муддат {r.due_at:%d.%m})")
             n += 1
         if r.status == "complete" and not r.erp_posted:
             raise_exception(s, "erp_posting_pending", f"{r.po_ref}:{r.sku}",
-                            f"{r.po_ref} {r.sku} physically received, not yet posted in SAP", severity="low")
+                            f"{r.po_ref} {r.sku} жисмонан қабул қилинди, SAP'да ҳали киритилмаган", severity="low")
     return n
 
 

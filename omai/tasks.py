@@ -34,6 +34,14 @@ ACTIONS = {
 }
 
 
+# What people read (Uzbek Cyrillic, the company rule); the codes stay English.
+STATE_UZ = {"assigned": "берилган", "in_progress": "бажарилмоқда", "blocked": "тўхтаган", "submitted": "топширилган",
+            "accepted": "қабул қилинган", "recount_required": "қайта санаш керак", "cancelled": "бекор қилинган"}
+ACTION_UZ = {"start": "бошлади", "help": "ёрдам сўради", "problem": "муаммо ҳақида хабар берди", "submit": "топширди",
+             "accept": "қабул қилди", "recount": "қайта санашга қайтарди", "reopen": "қайта очди",
+             "cancel": "бекор қилди"}
+
+
 class TaskError(ValueError):
     pass
 
@@ -50,10 +58,10 @@ def create(s: Session, *, kind: str, title: str, deadline: datetime, assignee_id
     if notify:
         user = s.get(User, assignee_id) if assignee_id else None
         local = deadline.astimezone(settings.tz).strftime("%H:%M %d.%m")
-        tell(s, user, f"<b>{title}</b>\nDue {local}. {result_required}".strip(), task_buttons(t.id),
+        tell(s, user, f"<b>{title}</b>\nМуддат: {local}. {result_required}".strip(), task_buttons(t.id),
              dedupe_key=f"task:{t.id}:new")
         if urgent:
-            escalate_now(s, t, "urgent")
+            escalate_now(s, t, "шошилинч деб берилган")
     return t
 
 
@@ -66,27 +74,27 @@ def open_for_ref(s: Session, ref: str, kind: str | None = None) -> list[Task]:
 
 def act(s: Session, task: Task, action: str, actor: User, note: str = "", evidence: dict | None = None) -> Task:
     if action not in ACTIONS:
-        raise TaskError(f"unknown action {action}")
+        raise TaskError(f"номаълум амал: {action}")
     allowed, target = ACTIONS[action]
     state = TaskState(task.state)
     if state not in allowed:
-        raise TaskError(f"cannot {action} a task that is {state.value}")
+        raise TaskError(f"«{STATE_UZ.get(state.value, state.value)}» ҳолатидаги топшириқда бу амални бажариб бўлмайди")
     if action in ("accept", "recount", "reopen"):
         if actor.id == task.assignee_id:
-            raise TaskError("the person who did the work cannot accept it")
+            raise TaskError("ишни бажарган киши уни ўзи қабул қила олмайди")
         if actor.role != task.accepting_role and Role(actor.role) not in (Role.manager, Role.owner):
-            raise TaskError(f"accepting this task needs the {task.accepting_role} role")
+            raise TaskError(f"бу топшириқни қабул қилиш учун «{task.accepting_role}» лавозими керак")
         task.accepted_by = actor.id if action == "accept" else None
     elif action != "cancel" and actor.id != task.assignee_id and Role(actor.role) not in (Role.manager, Role.owner):
-        raise TaskError("only the assignee or a manager can do this")
+        raise TaskError("буни фақат ижрочи ёки менежер қила олади")
     if action == "submit" and evidence is None and not task.evidence:
-        raise TaskError("submit needs evidence (scans, photos, count form)")
+        raise TaskError("топшириш учун далил керак (сканлар, расмлар, санаш варақаси)")
     if evidence:
         task.evidence = [*task.evidence, {**evidence, "by": actor.id, "at": now_utc().isoformat()}]
     if action in ("help", "problem"):
         task.blocker = note or action
         mgr = _manager_of(s, task)
-        tell(s, mgr, f"⚠ <b>{actor.name}</b>: {action} on «{task.title}»\n{note}", dedupe_key=None)
+        tell(s, mgr, f"⚠ <b>{actor.name}</b>: «{task.title}» — {ACTION_UZ.get(action, action)}\n{note}", dedupe_key=None)
     task.state = target.value
     task.updated_at = now_utc()
     if action == "start" and task.kind == "count" and task.ref and task.ref.startswith("count:"):
@@ -94,7 +102,7 @@ def act(s: Session, task: Task, action: str, actor: User, note: str = "", eviden
     audit(s, actor.id, f"task.{action}", task.id, note=note)
     if action == "accept":
         assignee = s.get(User, task.assignee_id) if task.assignee_id else None
-        tell(s, assignee, f"✅ Thank you — «{task.title}» is accepted.", dedupe_key=f"task:{task.id}:thanks")
+        tell(s, assignee, f"✅ Раҳмат, «{task.title}» қабул қилинди.", dedupe_key=f"task:{task.id}:thanks")
     return task
 
 
@@ -111,7 +119,7 @@ def _start_count(s: Session, count_id: str) -> None:
 def reschedule(s: Session, task: Task, new_deadline: datetime, actor: User, reason: str) -> Task:
     """A revised deadline keeps the original one (count discipline is measured against the original)."""
     if Role(actor.role) not in (Role.manager, Role.owner):
-        raise TaskError("only a manager approves a revised deadline")
+        raise TaskError("янги муддатни фақат менежер тасдиқлайди")
     task.deadline = new_deadline
     task.reminded_before = task.reminded_after = False
     audit(s, actor.id, "task.reschedule", task.id, new=new_deadline, original=task.original_deadline, reason=reason)
@@ -150,7 +158,7 @@ def _on_call(s: Session) -> User | None:
 
 def escalate_now(s: Session, task: Task, why: str) -> None:
     for person in {p.id: p for p in (_on_call(s), _manager_of(s, task)) if p}.values():
-        tell(s, person, f"🚨 <b>Urgent</b> ({why}): {task.title}", task_buttons(task.id),
+        tell(s, person, f"🚨 <b>Шошилинч</b> ({why}): {task.title}", task_buttons(task.id),
              dedupe_key=f"task:{task.id}:urgent:{person.id}")
     task.escalated_at = now_utc()
 
@@ -165,7 +173,7 @@ def reminder_tick(s: Session, now: datetime | None = None) -> dict:
         user = s.get(User, t.assignee_id) if t.assignee_id else None
         if not t.reminded_before and deadline - REMIND_BEFORE <= now < deadline:
             if in_shift(user, now):
-                tell(s, user, f"⏰ Due at {deadline.astimezone(settings.tz):%H:%M}: {t.title}", task_buttons(t.id),
+                tell(s, user, f"⏰ Муддат {deadline.astimezone(settings.tz):%H:%M} да: {t.title}", task_buttons(t.id),
                      dedupe_key=f"task:{t.id}:before")
                 t.reminded_before = True
                 stats["before"] += 1
@@ -173,7 +181,7 @@ def reminder_tick(s: Session, now: datetime | None = None) -> dict:
                 stats["deferred"] += 1
         if now >= deadline and not t.reminded_after:
             if in_shift(user, now) or t.urgent:
-                tell(s, user, f"❗ Overdue: {t.title}. Submit, or tell us what blocks it.", task_buttons(t.id),
+                tell(s, user, f"❗ Муддати ўтди: {t.title}. Илтимос, топширинг ёки нима халақит бераётганини ёзинг.", task_buttons(t.id),
                      dedupe_key=f"task:{t.id}:after")
                 t.reminded_after = True
                 stats["after"] += 1
@@ -183,8 +191,8 @@ def reminder_tick(s: Session, now: datetime | None = None) -> dict:
             mgr = _manager_of(s, t)
             if t.urgent or in_shift(mgr, now):
                 name = user.name if user else "unassigned"
-                tell(s, mgr, f"⬆ Escalation: «{t.title}» ({name}) is overdue since "
-                             f"{deadline.astimezone(settings.tz):%H:%M %d.%m}, state {t.state}.",
+                tell(s, mgr, f"⬆ Эскалация: «{t.title}» ({name}) муддати "
+                             f"{deadline.astimezone(settings.tz):%H:%M %d.%m} да ўтган, ҳолати: {STATE_UZ.get(t.state, t.state)}.",
                      task_buttons(t.id), dedupe_key=f"task:{t.id}:escalate")
                 t.escalated_at = now
                 stats["escalated"] += 1

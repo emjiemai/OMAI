@@ -36,8 +36,8 @@ def _freeze_guard(s: Session, lines, source: str, kind: str) -> None:
         skus = {l.sku for l in c.lines if l.sku != EMPTY}
         for ln in lines:
             if ln.sku in skus and c.location_code in (ln.from_loc, ln.to_loc):
-                raise StockError(f"{ln.sku} at {c.location_code} is frozen for count {c.id[:8]} — wait or use "
-                                 f"the approved movement log")
+                raise StockError(f"{ln.sku} {c.location_code} да {c.id[:8]} санаш учун музлатилган (frozen) — кутинг ёки "
+                                 f"тасдиқланган ҳаракатлар журналидан фойдаланинг")
 
 
 GUARDS.append(_freeze_guard)
@@ -48,7 +48,7 @@ def create(s: Session, *, location: str, counter: User, checker: User, deadline:
            skus: list[str] | None = None, bins: list[str] | None = None, kind: str = "cycle",
            freeze: bool = False) -> Count:
     if counter.id == checker.id:
-        raise StockError("the checker must be a different person from the counter")
+        raise StockError("текширувчи санаган кишидан бошқа одам бўлиши керак")
     c = Count(location_code=location, kind=kind, counter_id=counter.id, checker_id=checker.id, deadline=deadline,
               original_deadline=deadline, freeze=freeze)
     s.add(c)
@@ -74,18 +74,18 @@ def create(s: Session, *, location: str, counter: User, checker: User, deadline:
         if not any(k[0] == b for k in seen):
             c.lines.append(CountLine(bin=b, sku=EMPTY, lot=""))
     s.flush()
-    tasks.create(s, kind="count", title=f"Blind count {c.id[:8]} at {location} ({len(c.lines)} lines)",
+    tasks.create(s, kind="count", title=f"Кўр-кўрона санаш {c.id[:8]}, {location} ({len(c.lines)} қатор)",
                  deadline=deadline, assignee_id=counter.id, location=location, ref=f"count:{c.id}",
                  accepting_role=Role.checker.value,
-                 result_required="Scan item, bin and serial/batch. Enter 0 for an empty bin; leave blank only if not "
-                                 "counted.")
+                 result_required="Товар, ячейка ва серия/партияни сканерланг. Бўш ячейкага 0 ёзинг; фақат "
+                                 "санамаган бўлсангиз бўш қолдиринг.")
     audit(s, None, "count.create", c.id, lines=len(c.lines), counter=counter.id, checker=checker.id)
     return c
 
 
 def start(s: Session, count: Count, cutoff: datetime | None = None) -> Count:
     if count.status != "open":
-        raise StockError(f"count is {count.status}")
+        raise StockError(f"санаш ҳолати: {count.status}")
     count.cutoff_at = cutoff or now_utc()
     count.status = "counting"
     audit(s, None, "count.cutoff", count.id, cutoff=count.cutoff_at, freeze=count.freeze)
@@ -109,12 +109,12 @@ def submit(s: Session, count: Count, counter: User, entries: list[dict]) -> dict
     ``qty`` None (or missing) means blank: the line stays uncounted. Unlisted goods may be added by bin/sku.
     """
     if count.status not in ("counting", "recount"):
-        raise StockError(f"count is {count.status}")
+        raise StockError(f"санаш ҳолати: {count.status}")
     recounting = count.status == "recount"
     if recounting and counter.id == count.counter_id:
-        raise StockError("the recount must be done by someone other than the first counter")
+        raise StockError("қайта санашни биринчи санаган кишидан бошқа одам қилиши керак")
     if not recounting and counter.id != count.counter_id:
-        raise StockError("this count is assigned to someone else")
+        raise StockError("бу санаш бошқа кишига берилган")
     by_id = {l.id: l for l in count.lines}
     stored = 0
     for e in entries:
@@ -124,7 +124,7 @@ def submit(s: Session, count: Count, counter: User, entries: list[dict]) -> dict
                          and l.lot == (e.get("lot") or "")), None)
         if line is None:
             if s.get(Item, e.get("sku")) is None:
-                raise StockError(f"unknown SKU {e.get('sku')} — photograph the label and report it")
+                raise StockError(f"номаълум артикул {e.get('sku')} — ёрлиқни расмга олиб хабар беринг")
             line = CountLine(bin=e.get("bin", ""), sku=e["sku"], lot=e.get("lot") or "", unlisted=True)
             count.lines.append(line)
             s.flush()
@@ -168,7 +168,7 @@ def material(diff: float, unit_cost: float) -> bool:
 def evaluate(s: Session, count: Count) -> dict:
     """Compare each counted line with the ledger at the cutoff. Never changes stock."""
     if count.cutoff_at is None:
-        raise StockError("no cutoff recorded")
+        raise StockError("санаш бошланган вақт ёзилмаган")
     out = {"matched": 0, "recount": 0, "investigate": 0, "blank": 0}
     for line in count.lines:
         if line.status in ("matched", "resolved"):
@@ -204,8 +204,8 @@ def evaluate(s: Session, count: Count) -> dict:
         count.status = "recount"
         checker = s.get(User, count.checker_id)
         if not tasks.open_for_ref(s, f"count:{count.id}", "recount"):
-            tasks.create(s, kind="recount", title=f"Independent recount for count {count.id[:8]} "
-                                                  f"({out['recount']} lines)",
+            tasks.create(s, kind="recount", title=f"{count.id[:8]} санаш учун мустақил қайта санаш "
+                                                  f"({out['recount']} қатор)",
                          deadline=now_utc() + timedelta(hours=4), assignee_id=checker.id if checker else None,
                          location=count.location_code, ref=f"count:{count.id}", accepting_role=Role.manager.value)
         for l in count.lines:
@@ -255,10 +255,10 @@ def record_cause(s: Session, count: Count, line_id: int, cause: str, corrective_
                  actor: User) -> CountLine:
     line = next(l for l in count.lines if l.id == line_id)
     if line.status != "investigating":
-        raise StockError("only a confirmed variance needs a cause")
+        raise StockError("сабаб фақат тасдиқланган фарқ учун керак")
     line.cause = cause
     if corrective_task_for:
-        tasks.create(s, kind="corrective", title=f"Fix cause of variance {line.sku} {line.bin}: {cause}",
+        tasks.create(s, kind="corrective", title=f"{line.sku} {line.bin} фарқининг сабабини бартараф этиш: {cause}",
                      deadline=now_utc() + timedelta(days=3), assignee_id=corrective_task_for.id,
                      location=count.location_code, ref=f"count:{count.id}:{line.id}", notify=True)
     audit(s, actor.id, "count.cause", f"{count.id}:{line.id}", cause=cause)
@@ -275,7 +275,7 @@ def adjustment_payload(count: Count, line: CountLine) -> dict:
 def request_adjustment(s: Session, count: Count, line_id: int, requester: User):
     line = next(l for l in count.lines if l.id == line_id)
     if line.status != "investigating" or not line.cause:
-        raise StockError("record the cause before asking for a correction")
+        raise StockError("тузатиш сўрашдан олдин сабабини ёзинг")
     payload = adjustment_payload(count, line)
     item = s.get(Item, line.sku)
     value = abs(payload["diff"]) * (item.unit_cost if item else 0)
@@ -295,10 +295,10 @@ def apply_adjustment(s: Session, count: Count, approval, actor: User, poster=Non
 def close(s: Session, count: Count, actor: User) -> Count:
     """Close only when every line is matched or resolved through an executed correction."""
     if actor.id == count.counter_id:
-        raise StockError("the counter cannot close their own count")
+        raise StockError("санаган киши ўз санашини ёпа олмайди")
     pending = [l for l in count.lines if l.status not in ("matched", "resolved")]
     if pending:
-        raise StockError(f"{len(pending)} lines are not settled (blank, recount or awaiting approval)")
+        raise StockError(f"{len(pending)} қатор ҳал бўлмаган (бўш, қайта санаш ёки тасдиқ кутмоқда)")
     count.status, count.closed_at = "closed", now_utc()
     count.freeze = False
     for t in tasks.open_for_ref(s, f"count:{count.id}"):

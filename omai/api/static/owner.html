@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="uz-Cyrl">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OMAI Owner Dashboard</title>
+<title>OMAI — раҳбар саҳифаси</title>
 <style>
   :root { --bg:#f6f7f9; --card:#fff; --ink:#16181d; --muted:#667085; --line:#e4e7ec; --bad:#c4321c; --warn:#b54708; --ok:#127a43; }
   @media (prefers-color-scheme: dark) { :root { --bg:#111317; --card:#1a1d23; --ink:#e8eaee; --muted:#98a2b3; --line:#2a2f38; --bad:#ff7a66; --warn:#fdb022; --ok:#4cc38a; } }
@@ -21,13 +21,15 @@
 <body>
 <main id="app"></main>
 <script>
+const STATE_UZ = {assigned: 'берилган', in_progress: 'бажарилмоқда', blocked: 'тўхтаган', submitted: 'топширилган', accepted: 'қабул қилинган', recount_required: 'қайта санаш керак', cancelled: 'бекор қилинган'};
+
 const app = document.getElementById('app');
 let token = null; try { token = sessionStorage.getItem('omai'); } catch (e) {}
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const pct = v => v == null ? '—' : (v * 100).toFixed(1) + '%';
 
 function login() {
-  app.innerHTML = `<div class="tile"><b>OMAI</b><input id="l" placeholder="Login"> <input id="p" type="password" placeholder="PIN"> <button id="go">Sign in</button> <span id="e" class="high"></span></div>`;
+  app.innerHTML = `<div class="tile"><b>OMAI</b><input id="l" placeholder="Логин"> <input id="p" type="password" placeholder="PIN"> <button id="go">Кириш</button> <span id="e" class="high"></span></div>`;
   go.onclick = async () => {
     const r = await fetch('/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ login: l.value, pin: p.value }) });
     const b = await r.json(); if (!r.ok) { e.textContent = b.detail; return; }
@@ -41,30 +43,30 @@ async function load() {
   if (!r.ok) { app.textContent = (await r.json()).detail; return; }
   const d = await r.json(), m = d.measures;
   const tiles = [
-    ['Inventory accuracy', pct(m.inventory_accuracy), `${m.count_lines_verified} lines verified`],
+    ['Қолдиқ аниқлиги', pct(m.inventory_accuracy), `${m.count_lines_verified} қатор текширилди`],
     ['Serial / batch accuracy', pct(m.serial_batch_accuracy), 'reported separately'],
-    ['Count discipline', pct(m.count_discipline), `${m.counts_due} counts due`],
+    ['Санаш интизоми', pct(m.count_discipline), `${m.counts_due} та санаш муддатида`],
     ['Tasks overdue', m.tasks_overdue, 'open past deadline'],
     ['Open exceptions', m.open_exceptions, 'shown until resolved'],
     ['Transfers overdue', m.transfers_overdue, ''],
     ['Incomplete receipts', m.incomplete_receipts, ''],
     ['Safety overdue', m.safety_overdue, ''],
   ];
-  if (m.aged_value != null) tiles.push(['Aged stock value', Math.round(m.aged_value).toLocaleString(), `dead ${Math.round(m.dead_value).toLocaleString()}`]);
+  if (m.aged_value != null) tiles.push(['Эскирган қолдиқ қиймати', Math.round(m.aged_value).toLocaleString(), `ҳаракатсиз ${Math.round(m.dead_value).toLocaleString()}`]);
   app.innerHTML = `
-    <h2>Measures (30 days)</h2><div class="grid">${tiles.map(t => `<div class="tile"><span class="muted">${t[0]}</span><b>${t[1]}</b><span class="muted">${t[2]}</span></div>`).join('')}</div>
-    <h2>Source freshness</h2><div class="wrap"><table><tr><th>Source</th><th>Last success</th><th>Age</th><th>State</th></tr>
-      ${d.sources.map(s => `<tr><td>${s.source}${s.critical ? ' (critical)' : ''}</td><td>${s.last_success ? new Date(s.last_success).toLocaleString() : '—'}</td>
-      <td>${s.age_minutes ?? '—'} min</td><td class="${s.stale ? 'stale' : ''}">${s.stale ? 'STALE / unknown' : 'fresh'} ${esc(s.last_error || '')}</td></tr>`).join('')}</table></div>
-    <h2>Exceptions</h2><div class="wrap"><table><tr><th>Kind</th><th>Detail</th><th>Since</th></tr>
-      ${d.exceptions.map(e => `<tr><td class="${e.severity}">${esc(e.kind)}${e.owner_decision ? ' · owner' : ''}</td><td>${esc(e.detail)}</td><td>${new Date(e.created_at).toLocaleString()}</td></tr>`).join('') || '<tr><td colspan=3 class="muted">None open</td></tr>'}</table></div>
-    <h2>Pending approvals</h2><div class="wrap"><table><tr><th>Action</th><th>Reason</th><th>Value</th></tr>
-      ${d.approvals.map(a => `<tr><td>${a.action}</td><td>${esc(a.reason)}</td><td>${a.value ?? '—'}</td></tr>`).join('') || '<tr><td colspan=3 class="muted">None</td></tr>'}</table></div>
-    <h2>Due tasks</h2><div class="wrap"><table><tr><th>Task</th><th>State</th><th>Due</th></tr>
-      ${d.tasks.map(t => `<tr><td>${esc(t.title)}</td><td>${t.state}${t.overdue ? ' <span class="high">overdue</span>' : ''}</td><td>${new Date(t.deadline).toLocaleString()}</td></tr>`).join('')}</table></div>
-    <h2>Ageing and condition</h2><div class="wrap"><table><tr><th>SKU</th><th>Where</th><th>Qty</th><th>Idle days</th><th>Flags</th></tr>
+    <h2>Кўрсаткичлар (30 кун)</h2><div class="grid">${tiles.map(t => `<div class="tile"><span class="muted">${t[0]}</span><b>${t[1]}</b><span class="muted">${t[2]}</span></div>`).join('')}</div>
+    <h2>Манбалар янгилиги</h2><div class="wrap"><table><tr><th>Манба</th><th>Охирги муваффақият</th><th>Ёши</th><th>Ҳолат</th></tr>
+      ${d.sources.map(s => `<tr><td>${s.source}${s.critical ? ' (муҳим)' : ''}</td><td>${s.last_success ? new Date(s.last_success).toLocaleString() : '—'}</td>
+      <td>${s.age_minutes ?? '—'} дақ.</td><td class="${s.stale ? 'stale' : ''}">${s.stale ? 'ЭСКИРГАН / номаълум' : 'янги'} ${esc(s.last_error || '')}</td></tr>`).join('')}</table></div>
+    <h2>Муаммолар</h2><div class="wrap"><table><tr><th>Тури</th><th>Тафсилот</th><th>Қачондан</th></tr>
+      ${d.exceptions.map(e => `<tr><td class="${e.severity}">${esc(e.kind_label || e.kind)}${e.owner_decision ? ' · раҳбар' : ''}</td><td>${esc(e.detail)}</td><td>${new Date(e.created_at).toLocaleString()}</td></tr>`).join('') || '<tr><td colspan=3 class="muted">None open</td></tr>'}</table></div>
+    <h2>Тасдиқ кутаётганлар</h2><div class="wrap"><table><tr><th>Амал</th><th>Сабаб</th><th>Қиймат</th></tr>
+      ${d.approvals.map(a => `<tr><td>${a.action}</td><td>${esc(a.reason)}</td><td>${a.value ?? '—'}</td></tr>`).join('') || '<tr><td colspan=3 class="muted">Йўқ</td></tr>'}</table></div>
+    <h2>Муддатли топшириқлар</h2><div class="wrap"><table><tr><th>Топшириқ</th><th>Ҳолат</th><th>Муддат</th></tr>
+      ${d.tasks.map(t => `<tr><td>${esc(t.title)}</td><td>${STATE_UZ[t.state] || t.state}${t.overdue ? ' <span class="high">муддати ўтган</span>' : ''}</td><td>${new Date(t.deadline).toLocaleString()}</td></tr>`).join('')}</table></div>
+    <h2>Эскириш ва ҳолат</h2><div class="wrap"><table><tr><th>Артикул</th><th>Қаерда</th><th>Миқдор</th><th>Ҳаракатсиз кун</th><th>Белгилар</th></tr>
       ${d.ageing.map(a => `<tr><td>${esc(a.sku)} ${esc(a.name)}</td><td>${esc(a.loc)}/${esc(a.bin)}</td><td>${a.qty}</td><td>${a.idle_days}</td><td>${a.flags.join(', ')}${a.critical_spare ? ' · keep' : ''}</td></tr>`).join('')}</table></div>
-    <p class="muted"><a href="#" id="xl">Download stock (Excel)</a></p>`;
+    <p class="muted"><a href="#" id="xl">Қолдиқни юклаб олиш (Excel)</a></p>`;
   xl.onclick = async (ev) => { ev.preventDefault(); const b = await (await fetch('/reports/stock.xlsx', { headers: { Authorization: 'Bearer ' + token } })).blob(); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = 'omai-stock.xlsx'; a.click(); };
 }
 token ? load() : login();

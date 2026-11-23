@@ -32,9 +32,9 @@ def limit_for(role: Role) -> float:
 
 def request(s: Session, *, action: str, payload: dict, value: float, reason: str, requester: User) -> Approval:
     if action not in ACTIONS:
-        raise StockError(f"unknown approval action {action}")
+        raise StockError(f"номаълум тасдиқлаш амали: {action}")
     if not reason.strip():
-        raise StockError("a correction needs a recorded cause")
+        raise StockError("тузатиш учун сабаб ёзилган бўлиши керак")
     a = Approval(action=action, payload=payload, payload_hash=_hash(action, payload), value=abs(value),
                  reason=reason, requested_by=requester.id)
     s.add(a)
@@ -45,17 +45,17 @@ def request(s: Session, *, action: str, payload: dict, value: float, reason: str
 
 def decide(s: Session, approval: Approval, approver: User, approve: bool, note: str = "") -> Approval:
     if approval.status != "pending":
-        raise StockError(f"approval is already {approval.status}")
+        raise StockError(f"бу сўров аллақачон кўриб чиқилган ({approval.status})")
     role = Role(approver.role)
     if role not in APPROVER_ROLES:
-        raise StockError("you are not an approver")
+        raise StockError("сиз тасдиқловчи эмассиз")
     if approver.id == approval.requested_by:
-        raise StockError("nobody approves their own adjustment")
+        raise StockError("ҳеч ким ўз тузатишини ўзи тасдиқламайди")
     payload_actor = approval.payload.get("counted_by") or []
     if approver.id in payload_actor:
-        raise StockError("a counter cannot approve the correction of their own count")
+        raise StockError("санаган киши ўз санашининг тузатишини тасдиқлай олмайди")
     if approve and approval.value > limit_for(role):
-        raise StockError(f"{approval.value:,.0f} is above the {role.value} limit — needs a higher approver")
+        raise StockError(f"{approval.value:,.0f} — «{role.value}» чегарасидан юқори, юқорироқ тасдиқловчи керак")
     approval.status = "approved" if approve else "refused"
     approval.decided_by, approval.decided_at = approver.id, now_utc()
     audit(s, approver.id, f"approval.{approval.status}", approval.id, note=note)
@@ -66,9 +66,9 @@ def execute(s: Session, approval: Approval, actor: User, payload: dict, poster=N
             event_time: datetime | None = None) -> dict:
     """Do exactly the approved action. ``poster(approval) -> bool`` posts it to the ERP (SAP) when connected."""
     if approval.status != "approved":
-        raise StockError("not approved")
+        raise StockError("тасдиқланмаган")
     if _hash(approval.action, payload) != approval.payload_hash:
-        raise StockError("this is not the action that was approved")
+        raise StockError("бу тасдиқланган амал эмас")
     p = payload
     diff = float(p["diff"])
     if diff > 0:

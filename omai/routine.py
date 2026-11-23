@@ -21,6 +21,7 @@ from typing import Callable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from omai.ledger import KIND_UZ
 from omai import counting, insights, tasks
 from omai.config import settings
 from omai.db import session_scope
@@ -103,8 +104,8 @@ def every_15(s: Session) -> dict:
             tasks_open = s.scalar(select(Task).where(Task.ref == f"recover:{src['source']}",
                                                      Task.state.in_([st.value for st in OPEN_TASK_STATES])))
             if not tasks_open:
-                tasks.create(s, kind="recovery", title=f"{src['source']} data is stale "
-                                                       f"({src['age_minutes']:.0f} min): restore the sync",
+                tasks.create(s, kind="recovery", title=f"{src['source']} маълумоти эскирган "
+                                                       f"({src['age_minutes']:.0f} дақ.): синхронлашни тиклаш",
                              deadline=now_utc() + timedelta(hours=1), assignee_id=it.id if it else None,
                              ref=f"recover:{src['source']}", accepting_role=Role.it.value, priority=1)
     return out
@@ -115,10 +116,10 @@ def opening(s: Session) -> dict:
     for loc in s.scalars(select(Location).where(Location.active.is_(True), Location.kind.in_(["warehouse", "store",
                                                                                               "showroom"]))):
         lead = _lead(s, loc)
-        tasks.create(s, kind="safety_open", title=f"Opening check {loc.name}: access, aisles, storage, chemicals, "
-                                                  f"equipment", deadline=_today_at(9, 30),
+        tasks.create(s, kind="safety_open", title=f"{loc.name} очилиш текшируви: кириш, йўлаклар, сақлаш, кимёвий моддалар, "
+                                                  f"ускуналар", deadline=_today_at(9, 30),
                      assignee_id=lead.id if lead else None, location=loc.code, ref=f"open:{loc.code}:{now_utc():%F}",
-                     result_required="Confirm opening or report an issue (photo).", priority=2)
+                     result_required="Очилганини тасдиқланг ёки муаммони ёзинг (расм).", priority=2)
         n += 1
     return {"opening_tasks": n}
 
@@ -137,17 +138,17 @@ def assign(s: Session) -> dict:
                                                          ExpectedReceipt.status.in_(["expected", "partial"]))):
             if r.due_at and _aware(r.due_at).date() <= datetime.now(settings.tz).date() and \
                     not tasks.open_for_ref(s, f"receive:{r.po_ref}"):
-                tasks.create(s, kind="receive", title=f"Receive {r.po_ref}: check PO, packing list and goods",
+                tasks.create(s, kind="receive", title=f"{r.po_ref} ни қабул қилиш: буюртма, юк хати ва товарни текширинг",
                              deadline=today_end, assignee_id=lead.id if lead else None, location=loc.code,
-                             ref=f"receive:{r.po_ref}", result_required="Scan SKU, qty, serial/batch; report damage.")
+                             ref=f"receive:{r.po_ref}", result_required="Артикул, миқдор, серия/партияни сканерланг; шикастни ёзинг.")
                 out["receiving"] += 1
         for o in s.scalars(select(DispatchOrder).where(DispatchOrder.location_code == loc.code,
                                                        DispatchOrder.status == "open",
                                                        DispatchOrder.release_status == "approved")):
             if not tasks.open_for_ref(s, f"order:{o.order_ref}"):
-                tasks.create(s, kind="pick", title=f"Pick, pack and hand over {o.order_ref} ({o.customer})",
+                tasks.create(s, kind="pick", title=f"{o.order_ref} ни териш, қадоқлаш ва топшириш ({o.customer})",
                              deadline=today_end, assignee_id=lead.id if lead else None, location=loc.code,
-                             ref=f"order:{o.order_ref}", result_required="Scan bins and serials; proof of handover.")
+                             ref=f"order:{o.order_ref}", result_required="Ячейка ва серия рақамларини сканерланг; топширилгани ҳақида далил.")
                 out["dispatch"] += 1
     return out
 
@@ -161,8 +162,8 @@ def progress(s: Session) -> dict:
         if not mine:
             continue
         lines = [f"• {t.title} — {_aware(t.deadline).astimezone(settings.tz):%H:%M}"
-                 f"{' ⚠ overdue' if tasks.is_overdue(t) else ''}" for t in mine[:10]]
-        tell(s, u, "Progress check. Submit evidence, ask for help or propose a new time:\n" + "\n".join(lines),
+                 f"{' ⚠ муддати ўтган' if tasks.is_overdue(t) else ''}" for t in mine[:10]]
+        tell(s, u, "Иш ҳолати. Илтимос, далилни топширинг, ёрдам сўранг ёки янги вақт таклиф қилинг:\n" + "\n".join(lines),
              dedupe_key=f"progress:{u.id}:{now_utc():%F%H}")
         n += 1
     return {"people": n}
@@ -176,8 +177,8 @@ def closing(s: Session) -> dict:
     for loc in s.scalars(select(Location).where(Location.active.is_(True), Location.kind.in_(["warehouse", "store",
                                                                                               "showroom"]))):
         lead = _lead(s, loc)
-        tasks.create(s, kind="safety_close", title=f"Closing {loc.name}: locks, keys handed over, unfinished work "
-                                                   f"handed over", deadline=_today_at(18, 0),
+        tasks.create(s, kind="safety_close", title=f"{loc.name} ёпилиши: қулфлар, калитлар топширилди, тугалланмаган ишлар "
+                                                   f"топширилди", deadline=_today_at(18, 0),
                      assignee_id=lead.id if lead else None, location=loc.code, ref=f"close:{loc.code}:{now_utc():%F}",
                      priority=2)
     text = digest(s)
@@ -199,13 +200,13 @@ def digest(s: Session) -> str:
     for e in ex:
         by_kind[e.kind] = by_kind.get(e.kind, 0) + 1
     parts = [f"<b>OMAI — {datetime.now(settings.tz):%d.%m}</b>",
-             f"Tasks: {len(open_tasks)} open, {len(overdue)} overdue, {len(submitted)} awaiting acceptance",
-             "Exceptions: " + (", ".join(f"{k} {v}" for k, v in sorted(by_kind.items())) or "none")]
+             f"Топшириқлар: {len(open_tasks)} очиқ, {len(overdue)} муддати ўтган, {len(submitted)} қабул кутмоқда",
+             "Муаммолар: " + (", ".join(f"{KIND_UZ.get(k, k)} {v}" for k, v in sorted(by_kind.items())) or "йўқ")]
     if stale:
-        parts.append("⚠ Unknown / stale: " + ", ".join(stale))
+        parts.append("⚠ Номаълум / эскирган: " + ", ".join(stale))
     owner = [e for e in ex if e.owner_decision]
     if owner:
-        parts.append(f"Needs the owner: {len(owner)}")
+        parts.append(f"Раҳбар қарори керак: {len(owner)}")
     return "\n".join(parts)
 
 

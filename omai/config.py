@@ -19,11 +19,8 @@ COUNT_TOLERANCE_VALUE = 0.0
 ADJUSTMENT_LIMIT_MANAGER = 5_000_000      # so'm; above → accountant / owner
 ADJUSTMENT_LIMIT_ACCOUNTANT = 50_000_000
 
-# --- 1C OData: which register and columns hold stock (finance confirms) ---
-ONEC_BALANCE_ENTITY = "AccumulationRegister_ТоварыНаСкладах/Balance"
-ONEC_ITEM_FIELD = "Номенклатура_Key"
-ONEC_WAREHOUSE_FIELD = "Склад_Key"
-ONEC_QTY_FIELD = "КоличествоBalance"
+# --- 1C: stock is on the accounting register's stock accounts (docs/backend.md §4); finance confirms the list ---
+ONEC_STOCK_ACCOUNTS = ("29", "10", "28")   # товары, материалы, готовая продукция
 
 # --- where staff open the workspace from Telegram (the Render URL once deployed) ---
 WORKSPACE_URL = "http://localhost:8000"
@@ -46,7 +43,11 @@ class Settings(BaseSettings):
 
     billz_secret_token: SecretStr = SecretStr("")
 
-    telegram_primary_bot_token: SecretStr = SecretStr("")
+    # OMAI's OWN bot (@BotFather), set on the OMAI service — never one of the company bots (docs/backend.md §6)
+    omai_telegram_bot_token: SecretStr = SecretStr("")
+    # The company bots' tokens arrive through mgmg-shared; read only to refuse them.
+    admin_bot_telegram_bot_token: SecretStr = SecretStr("")
+    ops_manager_bot_telegram_bot_token: SecretStr = SecretStr("")
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 
@@ -65,7 +66,15 @@ class Settings(BaseSettings):
 
     @property
     def telegram_configured(self) -> bool:
-        return bool(self.telegram_primary_bot_token.get_secret_value())
+        return bool(self.omai_telegram_bot_token.get_secret_value()) and not self.telegram_token_is_company_bot
+
+    @property
+    def telegram_token_is_company_bot(self) -> bool:
+        """mgmg-api owns these bots by webhook: polling, setWebhook or sends from OMAI would break every employee's
+        chat. OMAI's Telegram stays off with such a token."""
+        mine = self.omai_telegram_bot_token.get_secret_value()
+        return bool(mine) and mine in {self.admin_bot_telegram_bot_token.get_secret_value(),
+                                       self.ops_manager_bot_telegram_bot_token.get_secret_value()} - {""}
 
     @property
     def run_scheduler(self) -> bool:
@@ -73,7 +82,7 @@ class Settings(BaseSettings):
 
     def derived_secret(self, purpose: str) -> str:
         """A per-purpose secret derived from the existing bot token (no extra variable)."""
-        base = self.telegram_primary_bot_token.get_secret_value() or self.database_url
+        base = self.omai_telegram_bot_token.get_secret_value() or self.database_url
         return hashlib.sha256(f"omai:{purpose}:{base}".encode()).hexdigest()
 
 

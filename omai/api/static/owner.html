@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OMAI Owner Dashboard</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#16181d; --muted:#667085; --line:#e4e7ec; --bad:#c4321c; --warn:#b54708; --ok:#127a43; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111317; --card:#1a1d23; --ink:#e8eaee; --muted:#98a2b3; --line:#2a2f38; --bad:#ff7a66; --warn:#fdb022; --ok:#4cc38a; } }
+  * { box-sizing:border-box } body { margin:0; font:15px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--ink) }
+  main { padding:16px; max-width:1100px; margin:auto } h2 { font-size:16px; margin:20px 0 8px }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px }
+  .tile { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px }
+  .tile b { display:block; font-size:22px } .muted { color:var(--muted); font-size:13px }
+  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden }
+  td, th { text-align:left; padding:8px; border-bottom:1px solid var(--line); font-size:14px; vertical-align:top }
+  .wrap { overflow-x:auto } .high,.critical { color:var(--bad) } .medium { color:var(--warn) } .stale { color:var(--bad); font-weight:600 }
+  input, button { font:inherit; padding:8px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--ink) }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script>
+const app = document.getElementById('app');
+let token = null; try { token = sessionStorage.getItem('omai'); } catch (e) {}
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const pct = v => v == null ? '—' : (v * 100).toFixed(1) + '%';
+
+function login() {
+  app.innerHTML = `<div class="tile"><b>OMAI</b><input id="l" placeholder="Login"> <input id="p" type="password" placeholder="PIN"> <button id="go">Sign in</button> <span id="e" class="high"></span></div>`;
+  go.onclick = async () => {
+    const r = await fetch('/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ login: l.value, pin: p.value }) });
+    const b = await r.json(); if (!r.ok) { e.textContent = b.detail; return; }
+    token = b.token; try { sessionStorage.setItem('omai', token); } catch (x) {} load();
+  };
+}
+
+async function load() {
+  const r = await fetch('/dashboard', { headers: { Authorization: 'Bearer ' + token } });
+  if (r.status === 401) return login();
+  if (!r.ok) { app.textContent = (await r.json()).detail; return; }
+  const d = await r.json(), m = d.measures;
+  const tiles = [
+    ['Inventory accuracy', pct(m.inventory_accuracy), `${m.count_lines_verified} lines verified`],
+    ['Serial / batch accuracy', pct(m.serial_batch_accuracy), 'reported separately'],
+    ['Count discipline', pct(m.count_discipline), `${m.counts_due} counts due`],
+    ['Tasks overdue', m.tasks_overdue, 'open past deadline'],
+    ['Open exceptions', m.open_exceptions, 'shown until resolved'],
+    ['Transfers overdue', m.transfers_overdue, ''],
+    ['Incomplete receipts', m.incomplete_receipts, ''],
+    ['Safety overdue', m.safety_overdue, ''],
+  ];
+  if (m.aged_value != null) tiles.push(['Aged stock value', Math.round(m.aged_value).toLocaleString(), `dead ${Math.round(m.dead_value).toLocaleString()}`]);
+  app.innerHTML = `
+    <h2>Measures (30 days)</h2><div class="grid">${tiles.map(t => `<div class="tile"><span class="muted">${t[0]}</span><b>${t[1]}</b><span class="muted">${t[2]}</span></div>`).join('')}</div>
+    <h2>Source freshness</h2><div class="wrap"><table><tr><th>Source</th><th>Last success</th><th>Age</th><th>State</th></tr>
+      ${d.sources.map(s => `<tr><td>${s.source}${s.critical ? ' (critical)' : ''}</td><td>${s.last_success ? new Date(s.last_success).toLocaleString() : '—'}</td>
+      <td>${s.age_minutes ?? '—'} min</td><td class="${s.stale ? 'stale' : ''}">${s.stale ? 'STALE / unknown' : 'fresh'} ${esc(s.last_error || '')}</td></tr>`).join('')}</table></div>
+    <h2>Exceptions</h2><div class="wrap"><table><tr><th>Kind</th><th>Detail</th><th>Since</th></tr>
+      ${d.exceptions.map(e => `<tr><td class="${e.severity}">${esc(e.kind)}${e.owner_decision ? ' · owner' : ''}</td><td>${esc(e.detail)}</td><td>${new Date(e.created_at).toLocaleString()}</td></tr>`).join('') || '<tr><td colspan=3 class="muted">None open</td></tr>'}</table></div>
+    <h2>Pending approvals</h2><div class="wrap"><table><tr><th>Action</th><th>Reason</th><th>Value</th></tr>
+      ${d.approvals.map(a => `<tr><td>${a.action}</td><td>${esc(a.reason)}</td><td>${a.value ?? '—'}</td></tr>`).join('') || '<tr><td colspan=3 class="muted">None</td></tr>'}</table></div>
+    <h2>Due tasks</h2><div class="wrap"><table><tr><th>Task</th><th>State</th><th>Due</th></tr>
+      ${d.tasks.map(t => `<tr><td>${esc(t.title)}</td><td>${t.state}${t.overdue ? ' <span class="high">overdue</span>' : ''}</td><td>${new Date(t.deadline).toLocaleString()}</td></tr>`).join('')}</table></div>
+    <h2>Ageing and condition</h2><div class="wrap"><table><tr><th>SKU</th><th>Where</th><th>Qty</th><th>Idle days</th><th>Flags</th></tr>
+      ${d.ageing.map(a => `<tr><td>${esc(a.sku)} ${esc(a.name)}</td><td>${esc(a.loc)}/${esc(a.bin)}</td><td>${a.qty}</td><td>${a.idle_days}</td><td>${a.flags.join(', ')}${a.critical_spare ? ' · keep' : ''}</td></tr>`).join('')}</table></div>
+    <p class="muted"><a href="#" id="xl">Download stock (Excel)</a></p>`;
+  xl.onclick = async (ev) => { ev.preventDefault(); const b = await (await fetch('/reports/stock.xlsx', { headers: { Authorization: 'Bearer ' + token } })).blob(); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = 'omai-stock.xlsx'; a.click(); };
+}
+token ? load() : login();
+</script>
+</body>
+</html>

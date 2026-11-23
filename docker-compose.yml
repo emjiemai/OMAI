@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgres:16
+    environment: { POSTGRES_DB: omai, POSTGRES_USER: omai, POSTGRES_PASSWORD: omai }
+    volumes: [ "pg:/var/lib/postgresql/data" ]
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://omai:omai@db:5432/omai
+      RUN_SCHEDULER: "true"
+    ports: [ "8000:8000" ]
+    depends_on: [ db ]
+volumes: { pg: {} }

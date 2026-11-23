@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OMAI Workspace</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#16181d; --muted:#667085; --line:#e4e7ec; --accent:#1f6feb; --bad:#c4321c; --ok:#127a43; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111317; --card:#1a1d23; --ink:#e8eaee; --muted:#98a2b3; --line:#2a2f38; --accent:#5b9bff; --bad:#ff7a66; --ok:#4cc38a; } }
+  * { box-sizing:border-box }
+  body { margin:0; font:16px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--ink) }
+  header { padding:14px 16px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center }
+  main { padding:16px; max-width:720px; margin:auto }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:12px }
+  .muted { color:var(--muted); font-size:14px }
+  .over { color:var(--bad); font-weight:600 }
+  button { font:inherit; padding:10px 12px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--ink); margin:4px 4px 0 0; min-height:44px }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent) }
+  input { font:inherit; padding:10px; border-radius:8px; border:1px solid var(--line); width:100%; background:var(--card); color:var(--ink) }
+  table { width:100%; border-collapse:collapse } td { padding:6px 4px; border-bottom:1px solid var(--line) }
+  td input { width:90px }
+</style>
+</head>
+<body>
+<header><b>OMAI</b><span id="who" class="muted"></span></header>
+<main id="app"></main>
+<script>
+const $ = (h) => { const d = document.createElement('div'); d.innerHTML = h; return d; };
+let token = null; try { token = sessionStorage.getItem('omai'); } catch (e) {}
+const app = document.getElementById('app');
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token, ...(opts.headers || {}) } });
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.detail || r.statusText);
+  return body;
+}
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function loginView() {
+  app.innerHTML = `<div class="card"><h3>Sign in</h3>
+    <input id="l" placeholder="Login" autocomplete="username"><br><br>
+    <input id="p" placeholder="PIN" type="password" inputmode="numeric" autocomplete="current-password"><br>
+    <button class="primary" id="go">Sign in</button> <span id="err" class="over"></span></div>`;
+  document.getElementById('go').onclick = async () => {
+    try {
+      const r = await fetch('/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ login: l.value, pin: p.value }) });
+      const b = await r.json(); if (!r.ok) throw new Error(b.detail);
+      token = b.token; try { sessionStorage.setItem('omai', token); } catch (e) {}
+      document.getElementById('who').textContent = b.user.name + ' · ' + b.user.role;
+      tasksView();
+    } catch (e) { err.textContent = e.message; }
+  };
+}
+
+async function tasksView() {
+  let list;
+  try { list = await api('/me/tasks'); } catch (e) { return loginView(); }
+  app.innerHTML = list.length ? '' : '<div class="card muted">No open tasks. Thank you.</div>';
+  for (const t of list) {
+    const due = new Date(t.deadline).toLocaleString([], { hour:'2-digit', minute:'2-digit', day:'2-digit', month:'2-digit' });
+    const c = $(`<div class="card"><b>${esc(t.title)}</b>
+      <div class="muted">${esc(t.location || '')} · due ${due} ${t.overdue ? '<span class="over">overdue</span>' : ''} · ${esc(t.state)}</div>
+      <div class="muted">${esc(t.result_required)}</div>
+      <div>
+        <button data-a="start">Start</button><button data-a="help">Need help</button>
+        <button data-a="problem">Report problem</button><button class="primary" data-a="submit">Submit</button>
+      </div></div>`);
+    c.querySelectorAll('button').forEach(b => b.onclick = () => act(t, b.dataset.a));
+    app.appendChild(c);
+  }
+}
+
+async function act(t, a) {
+  try {
+    if (a === 'submit' && (t.kind === 'count' || t.kind === 'recount') && t.ref) return countView(t);
+    let note = '';
+    if (a === 'help' || a === 'problem') { note = prompt('What is the problem?') || ''; }
+    const evidence = a === 'submit' ? { note: prompt('What was done? (scans are recorded separately)') || 'done' } : null;
+    await api(`/tasks/${t.id}/${a}`, { method:'POST', body: JSON.stringify({ note, evidence }) });
+    tasksView();
+  } catch (e) { alert(e.message); }
+}
+
+// Blind count form: no expected quantity is ever sent to this page.
+async function countView(t) {
+  const cid = t.ref.split(':')[1];
+  const form = await api(`/counts/${cid}/form`);
+  app.innerHTML = `<div class="card"><b>${esc(t.title)}</b>
+    <p class="muted">Enter what you see. <b>0</b> = counted empty. Leave blank only if you did not count it.
+    Scan serials separated by spaces.</p>
+    <table>${form.map(f => `<tr><td>${esc(f.bin)}</td><td>${esc(f.sku === '*' ? '(should be empty)' : f.sku)} ${esc(f.lot)}</td>
+      <td><input data-line="${f.line_id}" inputmode="decimal"></td><td><input data-serials="${f.line_id}" placeholder="serials"></td></tr>`).join('')}</table>
+    <p class="muted">Found something not on the list? Bin, SKU, qty:</p>
+    <input id="extra" placeholder="G01 GARMIN-123 2">
+    <button class="primary" id="send">Submit count</button> <button id="back">Back</button></div>`;
+  document.getElementById('back').onclick = tasksView;
+  document.getElementById('send').onclick = async () => {
+    const entries = form.map(f => {
+      const v = document.querySelector(`[data-line="${f.line_id}"]`).value.trim();
+      const sn = document.querySelector(`[data-serials="${f.line_id}"]`).value.trim();
+      return { line_id: f.line_id, qty: v === '' ? null : Number(v), serials: sn ? sn.split(/\s+/) : [] };
+    });
+    const ex = extra.value.trim().split(/\s+/);
+    if (ex.length === 3) entries.push({ bin: ex[0], sku: ex[1], qty: Number(ex[2]) });
+    try {
+      await api(`/counts/${cid}/submit`, { method:'POST', body: JSON.stringify({ entries }) });
+      await api(`/tasks/${t.id}/submit`, { method:'POST', body: JSON.stringify({ evidence: { count: cid, lines: entries.length } }) });
+      tasksView();
+    } catch (e) { alert(e.message); }
+  };
+}
+
+token ? tasksView() : loginView();
+</script>
+</body>
+</html>

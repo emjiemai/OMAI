@@ -1,0 +1,40 @@
+# Render Blueprint (same pattern as mgmg-agents): one Postgres, one always-on API that also runs the schedule.
+# Secrets are sync:false — Render asks for them at setup; they never live in this repo.
+databases:
+  - name: omai-db
+    databaseName: omai
+    user: omai
+    plan: basic-256mb
+    postgresMajorVersion: 16
+services:
+  - type: web
+    name: omai-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase: { name: omai-db, property: connectionString }
+      - key: RUN_SCHEDULER
+        value: "true"
+      - key: TIMEZONE
+        value: Asia/Tashkent
+      - key: SESSION_SECRET
+        generateValue: true
+      - { key: SAP_SL_URL, sync: false }
+      - { key: SAP_COMPANY_DB, sync: false }
+      - { key: SAP_READ_USER, sync: false }
+      - { key: SAP_READ_PASSWORD, sync: false }
+      - { key: SAP_POST_USER, sync: false }
+      - { key: SAP_POST_PASSWORD, sync: false }
+      - { key: SAP_PUSH_SECRET, sync: false }
+      - { key: ONEC_ODATA_URL, sync: false }
+      - { key: ONEC_LOGIN, sync: false }
+      - { key: ONEC_PASSWORD, sync: false }
+      - { key: BILLZ_SECRET_TOKEN, sync: false }
+      - { key: TELEGRAM_BOT_TOKEN, sync: false }
+      - { key: TELEGRAM_WEBHOOK_SECRET, sync: false }
+      - { key: CASH_WEBHOOK_SECRET, sync: false }
+      - { key: AIPRO_WEBHOOK_URL, sync: false }
+      - { key: MIYA_WEBHOOK_URL, sync: false }

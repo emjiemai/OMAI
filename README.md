@@ -96,7 +96,7 @@ cp .env.example .env
 .venv/bin/python -m pytest -q
 ```
 
-Deploy: Render Blueprint (`render.yaml`) — Postgres + one always-on API that runs the schedule, using the existing `mgmg-shared` environment group. Environment variables OMAI reads: see `.env.example` (nothing new). Or
+Deploy: Render Blueprint (`render.yaml`) — Postgres + one always-on API that runs the schedule, with only the variables OMAI reads set on the service (no `mgmg-shared` group): `ENVIRONMENT`, `TZ`, `DRY_RUN`, `OMAI_TELEGRAM_BOT_TOKEN`, `SAP_PUSH_WEBHOOK_SECRET`, `ONEC_ODATA_URL`, `ONEC_LOGIN`, `ONEC_PASSWORD`, `BILLZ_SECRET_TOKEN`; `DATABASE_URL` comes from OMAI's own database. Or
 `docker compose up`.
 
 ## Test it locally (before production)

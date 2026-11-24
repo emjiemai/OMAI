@@ -12,13 +12,26 @@ services:
     dockerfilePath: ./Dockerfile
     plan: starter
     healthCheckPath: /health
+    # Only what OMAI reads — no fromGroup, so the service does not receive the company's other secrets
+    # (mgmg-shared stays as it is: mgmg-api runs on it). Values marked sync:false are entered once in Render.
     envVars:
       - key: DATABASE_URL
         fromDatabase: { name: omai-db, property: connectionString }
-    # Secrets come from the existing shared environment group (the one mgmg-agents uses); OMAI reads only:
-    # ENVIRONMENT, DRY_RUN, TZ, SAP_PUSH_WEBHOOK_SECRET, ONEC_ODATA_URL, ONEC_LOGIN, ONEC_PASSWORD,
-    # BILLZ_SECRET_TOKEN — plus the two company bot tokens, only to refuse them as OMAI's own (docs/backend.md §6).
-      - fromGroup: mgmg-shared
-    # OMAI's own Telegram bot (@BotFather) — on this service only, never in mgmg-shared.
-      - key: OMAI_TELEGRAM_BOT_TOKEN
+      - key: ENVIRONMENT
+        value: production
+      - key: TZ
+        value: Asia/Tashkent
+      - key: DRY_RUN
+        value: "false"
+      - key: OMAI_TELEGRAM_BOT_TOKEN     # OMAI's own bot (@BotFather), never a company bot
+        sync: false
+      - key: SAP_PUSH_WEBHOOK_SECRET     # same value as in mgmg-shared
+        sync: false
+      - key: ONEC_ODATA_URL
+        value: https://clobus.uz/a/acc313/61458/odata/standard.odata/
+      - key: ONEC_LOGIN
+        sync: false
+      - key: ONEC_PASSWORD
+        sync: false
+      - key: BILLZ_SECRET_TOKEN
         sync: false

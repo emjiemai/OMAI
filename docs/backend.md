@@ -39,7 +39,10 @@ guessing. Its `CLAUDE.md` and `docs/agent-specs/*.md` are the reference.
   - OPS Manager Bot: `OPS_MANAGER_BOT_TELEGRAM_BOT_TOKEN`, `OPS_MANAGER_BOT_WEBHOOK_SECRET`, `OPS_MANAGER_BOT_MODEL`, `OPS_MANAGER_BOT_FALLBACK_MODELS`;
   - backups: `BACKUP_SECRET`, `BACKUP_PUBLIC_KEY`.
 - `DATABASE_URL` is **per service** (`fromDatabase`), not in the group, so OMAI's own database URL doesn't clash.
-- `fromGroup: mgmg-shared` hands OMAI **every** secret above. Read only what you need, and never log any of them.
+- OMAI does **not** use `fromGroup: mgmg-shared` (it would hand OMAI every secret above). `render.yaml` sets only the
+  9 variables OMAI reads on the OMAI service. Without the group, the company bot tokens are absent, so
+  `telegram_token_is_company_bot` can't compare against them: never paste a company bot token into
+  `OMAI_TELEGRAM_BOT_TOKEN`.
 - OMAI's own bot token `OMAI_TELEGRAM_BOT_TOKEN` is set on the OMAI service, not in the group. See §6.
 
 ## 3. SAP Business One

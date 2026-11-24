@@ -4,6 +4,8 @@
     python -m scripts.load_master --apply              # create the SAP warehouses and the 1C items
     python -m scripts.load_master --link 01 onec=<key>     # warehouse 01 = this 1C склад (first 8+ chars of its key)
     python -m scripts.load_master --link G.A._01 billz=<shop id>
+    python -m scripts.load_master --pilot 01           # look only: what the switch would do
+    python -m scripts.load_master --pilot 01 --apply   # OMAI takes over 01 (run the morning of its first count)
 
 Run it where the 1C / Billz variables are set (the Render Shell of omai-api). Read-only towards 1C and Billz (GET,
 plus Billz's login). Prints counts and the склад / shop names needed for linking — never quantities or amounts.
@@ -158,11 +160,55 @@ def link(code: str, target: str) -> None:
             print(f"{code} = Billz shop {value}")
 
 
+def pilot(code: str, apply: bool) -> None:
+    """Hand a warehouse to OMAI: from now on staff scans in OMAI are the authority there.
+
+    OMAI's book starts from SAP's current stock at that warehouse — one ``opening`` movement per item, no bin yet
+    (bin ""), recorded once (``idem_key`` ``opening:<code>:<sku>``). The baseline blind count then checks it: the
+    count list comes from these items (no quantities shown), and every difference goes the normal way — independent
+    recount, cause, approval. Nothing here changes SAP. Refused when SAP is stale or the warehouse already has
+    movements in OMAI.
+    """
+    from omai.ledger import Line, audit, record
+    from omai.models import ExternalBalance, MovementLine
+    from omai.sources import is_stale
+
+    with session_scope() as s:
+        loc = s.get(Location, code)
+        if loc is None:
+            raise SystemExit(f"no warehouse {code}: run --apply first")
+        if loc.movement_source == "omai":
+            raise SystemExit(f"{code} is already run by OMAI")
+        used = s.scalar(select(MovementLine.id).where((MovementLine.to_loc == code) | (MovementLine.from_loc == code)))
+        if used:
+            raise SystemExit(f"{code} already has movements in OMAI: not switched")
+        if is_stale(s, "sap"):
+            raise SystemExit("SAP data is stale: wait until SAP is fresh (see /health), then run again")
+        rows = s.scalars(select(ExternalBalance).where(ExternalBalance.source == "sap",
+                                                       ExternalBalance.location_code == code)).all()
+        positive = [r for r in rows if r.qty > 0]
+        print(f"{code}: SAP lists {len(rows)} items, {len(positive)} with stock > 0, "
+              f"{sum(1 for r in rows if r.qty < 0)} negative (not booked)")
+        if not apply:
+            print("Nothing written. Add --apply to switch.")
+            return
+        for r in positive:
+            record(s, idem_key=f"opening:{code}:{r.sku}", source="sap", kind="opening",
+                   lines=[Line(sku=r.sku, qty=r.qty, to_loc=code, to_cond="saleable")],
+                   doc_ref=f"SAP opening {code}", strict=False, note="opening balance from SAP")
+        loc.movement_source = "omai"
+        audit(s, None, "location_switched_to_omai", code, opening_items=len(positive))
+        print(f"{code} is now run by OMAI: {len(positive)} opening items booked. Next: the baseline count.")
+
+
 def main() -> None:
     args = sys.argv[1:]
     init_db()
     if len(args) == 3 and args[0] == "--link":
         link(args[1], args[2])
+        return
+    if len(args) in (2, 3) and args[0] == "--pilot" and args[2:] in ([], ["--apply"]):
+        pilot(args[1], args[2:] == ["--apply"])
         return
     if args not in ([], ["--apply"]):
         print(__doc__)

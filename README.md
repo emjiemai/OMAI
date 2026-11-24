@@ -155,6 +155,24 @@ them: a blocked person can use neither the bot nor the pages, and the bot forget
 the roles that approve or see costs (manager, accountant, owner); nobody blocks or demotes themselves; one active
 owner always stays. Every change is in `audit_log` (what changed, never the PIN).
 
+## The bot (@mgmomaibot)
+
+`/login <login> <PIN>` once; then buttons under the message box: **📋 Топшириқларим** (open tasks with Бошлаш /
+Ёрдам керак / Муаммо / Топшириш) and, for manager / accountant / owner / IT, **📊 Ҳолат** (`/status`): SAP, 1C and
+Billz freshness, open differences per system, other open problems, overdue tasks — counts only. Free text gets a
+short pointer to the buttons (no AI). A Telegram resend of the same update is answered once.
+
+## Start the pilot (01)
+
+On the morning of the first count, in the omai-api Shell:
+
+```bash
+python -m scripts.load_master --pilot 01            # look only
+python -m scripts.load_master --pilot 01 --apply    # OMAI's book starts from SAP's stock at 01; staff scans rule 01
+```
+
+From then on every movement in or out of 01 is scanned in OMAI; the baseline blind count checks the opening book.
+
 ## Load warehouses and items
 
 In the Render Shell of omai-api (where the 1C / Billz variables are):

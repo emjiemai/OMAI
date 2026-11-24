@@ -18,7 +18,7 @@ from omai import approvals, auth, counting, insights, tasks, warehouse
 from omai.config import settings
 from omai.db import SessionLocal, init_db
 from omai.ledger import StockError, available, balance
-from omai.models import (APPROVER_ROLES, COST_ROLES, OPEN_TASK_STATES, Approval, Count, Exception_,
+from omai.models import (APPROVER_ROLES, COST_ROLES, OPEN_TASK_STATES, ROLE_UZ, Approval, Count, Exception_,
                          Role, Task, User, now_utc)
 from omai.sources import freshness
 
@@ -448,8 +448,6 @@ def dashboard(user: User = Depends(need(Role.manager, Role.accountant, Role.owne
 # The owner and IT manage who may use OMAI (web and Telegram). Only the owner gives or changes the roles that approve
 # or see costs (manager, accountant, owner). Nobody blocks or demotes themselves; one active owner always stays.
 ADMIN_ROLES = (Role.owner, Role.it)
-ROLE_UZ = {"staff": "омборчи", "custodian": "дўкон масъули", "checker": "текширувчи", "manager": "менежер",
-           "accountant": "бухгалтер", "owner": "раҳбар", "it": "IT"}
 
 
 def _user_json(u: User) -> dict:

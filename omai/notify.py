@@ -49,6 +49,10 @@ def _send(client: httpx.Client, m: Outbox) -> None:
         payload: dict = {"chat_id": m.to, "text": m.body["text"], "parse_mode": "HTML"}
         if m.body.get("buttons"):
             payload["reply_markup"] = {"inline_keyboard": m.body["buttons"]}
+        elif m.body.get("keyboard"):   # the buttons that stay under the message box
+            payload["reply_markup"] = {"keyboard": m.body["keyboard"], "resize_keyboard": True, "is_persistent": True}
+        elif m.body.get("remove_keyboard"):
+            payload["reply_markup"] = {"remove_keyboard": True}
         r = client.post(f"https://api.telegram.org/bot{settings.omai_telegram_bot_token.get_secret_value()}/sendMessage",
                         json=payload)
         r.raise_for_status()

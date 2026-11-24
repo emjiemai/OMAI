@@ -63,3 +63,31 @@ def test_onec_sync_adds_cards_that_are_one_item(s, monkeypatch):
     b = s.scalar(select(ExternalBalance).where(ExternalBalance.source == "1c", ExternalBalance.sku == "010-1"))
     assert b.qty == 5
     assert s.scalar(select(ExternalBalance).where(ExternalBalance.sku == "OLD")).qty == 0
+
+
+def test_pilot_opens_from_sap_and_switches(s, monkeypatch):
+    from contextlib import contextmanager
+
+    from omai.ledger import balance
+    from omai.sources import mark_success
+
+    load_master.load_warehouses(s)
+    s.add_all([Item(sku="A", name="A"), Item(sku="B", name="B")])
+    s.flush()
+    s.add_all([ExternalBalance(source="sap", location_code="01", sku="A", qty=3),
+               ExternalBalance(source="sap", location_code="01", sku="B", qty=-1)])
+    mark_success(s, "sap")
+    s.flush()
+
+    @contextmanager
+    def same():
+        yield s
+    monkeypatch.setattr(load_master, "session_scope", same)
+    load_master.pilot("01", apply=False)
+    assert s.get(Location, "01").movement_source == "sap"
+    load_master.pilot("01", apply=True)
+    assert s.get(Location, "01").movement_source == "omai"
+    assert balance(s, sku="A", loc="01") == 3 and balance(s, sku="B", loc="01") == 0
+    import pytest
+    with pytest.raises(SystemExit):
+        load_master.pilot("01", apply=True)

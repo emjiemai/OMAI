@@ -67,6 +67,8 @@ class Role(str, enum.Enum):
 
 
 COST_ROLES = {Role.manager, Role.accountant, Role.owner}
+ROLE_UZ = {"staff": "омборчи", "custodian": "дўкон масъули", "checker": "текширувчи", "manager": "менежер",
+           "accountant": "бухгалтер", "owner": "раҳбар", "it": "IT"}
 APPROVER_ROLES = {Role.manager, Role.accountant, Role.owner}
 
 

@@ -85,21 +85,62 @@ def send_ageing_to_aipro(s: Session, now: datetime | None = None) -> int:
 
 
 # ----------------------------------------------------------------- reconciliation
+# A Billz shop linked to one of these locations is compared with SAP over all the listed warehouses together: the Abay
+# shop sells from G.A._01, 05 and G.A._02 (mgmg-agents BILLZ_SAP_WAREHOUSES, spec 17 — the same rule as its check).
+BILLZ_SHOP_SAP_WAREHOUSES: dict[str, tuple[str, ...]] = {"G.A._01": ("G.A._01", "05", "G.A._02")}
+REF_LABEL = {"omai": "OMAI журналида", "sap": "SAP'да", "1c": "1С'да", "billz": "Billz'да"}
+
+
 def reconcile_systems(s: Session) -> list[dict]:
-    """OMAI's verified ledger vs what SAP / 1C / Billz say. A difference is an exception, never an average."""
-    diffs = []
+    """Each location against its own authority (``Location.movement_source``), never an average.
+
+    * ``omai`` (staff scan there): SAP, 1C and Billz are each compared with OMAI's verified ledger.
+    * ``sap`` / ``billz``: the other systems are compared with that system's balance — not with OMAI's ledger, which
+      holds nothing for such a location until its movements are booked from an opening balance.
+
+    A pair is compared only where both sides know the item: the reference row exists, or the reference is SAP (whose
+    picture is complete: an item it doesn't list there is 0). A difference opens an exception; agreement, or a pair
+    no longer compared, closes it.
+    """
+    from collections import defaultdict
+
+    from omai.models import Location, SourceSync
+
+    locs = {loc.code: loc for loc in s.scalars(select(Location))}
+    synced = {r.source for r in s.scalars(select(SourceSync)) if r.last_success}
+    ext: dict[str, dict[tuple[str, str], ExternalBalance]] = defaultdict(dict)
     for eb in s.scalars(select(ExternalBalance)):
-        ours = balance(s, sku=eb.sku, loc=eb.location_code)
-        ref = f"{eb.source}:{eb.location_code}:{eb.sku}"
-        if abs(ours - eb.qty) > 1e-6:
-            d = {"source": eb.source, "loc": eb.location_code, "sku": eb.sku, "omai": ours, "system": eb.qty,
-                 "diff": eb.qty - ours, "read_at": eb.read_at.isoformat()}
-            diffs.append(d)
-            raise_exception(s, "system_mismatch", ref,
-                            f"{eb.source}: {eb.location_code} да {eb.qty:g} × {eb.sku}, OMAI журналида {ours:g}",
-                            severity="medium", **d)
-        else:
-            resolve_exception(s, "system_mismatch", ref, "balances agree")
+        ext[eb.source][(eb.location_code, eb.sku)] = eb
+    diffs, compared = [], set()
+    for source, rows in ext.items():
+        for (loc_code, sku), eb in rows.items():
+            loc = locs.get(loc_code)
+            authority = loc.movement_source if loc else None
+            if loc is None or source == authority:
+                continue                       # the authority is the reference, not compared with itself
+            if authority == "omai":
+                ref_qty = balance(s, sku=sku, loc=loc_code)
+            else:
+                group = BILLZ_SHOP_SAP_WAREHOUSES.get(loc_code, (loc_code,)) if source == "billz" else (loc_code,)
+                ref_rows = [ext.get(authority, {}).get((g, sku)) for g in group]
+                if authority not in synced or (authority != "sap" and all(r is None for r in ref_rows)):
+                    continue
+                ref_qty = sum(r.qty for r in ref_rows if r is not None)
+            ref = f"{source}:{loc_code}:{sku}"
+            compared.add(ref)
+            if abs(ref_qty - eb.qty) > 1e-6:
+                d = {"source": source, "loc": loc_code, "sku": sku, "reference": authority, "reference_qty": ref_qty,
+                     "system": eb.qty, "diff": eb.qty - ref_qty, "read_at": eb.read_at.isoformat()}
+                diffs.append(d)
+                raise_exception(s, "system_mismatch", ref,
+                                f"{REF_LABEL.get(source, source)} {loc_code} да {eb.qty:g} × {sku}, "
+                                f"{REF_LABEL.get(authority, authority)} {ref_qty:g}", severity="medium", **d)
+            else:
+                resolve_exception(s, "system_mismatch", ref, "balances agree")
+    for exc in s.scalars(select(Exception_).where(Exception_.kind == "system_mismatch", Exception_.status == "open")):
+        if exc.ref not in compared:
+            exc.status, exc.resolved_at = "resolved", now_utc()
+            exc.resolution = "not compared: the location's own authority, or an item one side doesn't know"
     return diffs
 
 

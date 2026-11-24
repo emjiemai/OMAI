@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 
 from omai.config import ONEC_STOCK_ACCOUNTS, settings
 from omai.connectors.ingest import set_external_balance
-from omai.models import Item, Location
+from omai.models import ExternalBalance, Item, Location
 from omai.sources import mark_failure, mark_success
 
 CHART = "ChartOfAccounts_Хозрасчетный"
@@ -138,6 +138,15 @@ def sync(s: Session, client: OneC | None = None, at: datetime | None = None) -> 
             totals[(whs, item.sku)] += q
         for (whs, sku), q in totals.items():
             stats["mapped"] += set_external_balance(s, "1c", whs, sku, q)
+        # the register leaves out zero balances: what a linked склад no longer lists is 0 now
+        loc_of = {loc.onec_ref: loc.code for loc in s.scalars(select(Location).where(Location.onec_ref.is_not(None)))}
+        seen = {(loc_of[w], sku) for (w, sku) in totals}
+        stats["zeroed"] = 0
+        for b in s.scalars(select(ExternalBalance).where(ExternalBalance.source == "1c",
+                                                         ExternalBalance.location_code.in_(list(loc_of.values())))):
+            if (b.location_code, b.sku) not in seen and b.qty != 0:
+                b.qty = 0
+                stats["zeroed"] += 1
         stats["unmapped_items"], stats["unmapped_warehouses"] = len(missing_items), len(missing_whs)
         mark_success(s, "1c")
         return stats

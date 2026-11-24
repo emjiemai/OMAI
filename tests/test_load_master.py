@@ -41,6 +41,9 @@ def test_onec_sync_adds_cards_that_are_one_item(s, monkeypatch):
     onec._kept.clear()
     s.get(Location, "WH1").onec_ref = "whs-main"
     s.add(Item(sku="010-1", name="Fenix 8", sap_code="010-1"))
+    s.add(Item(sku="OLD", name="Sold out", sap_code="OLD"))
+    s.flush()
+    s.add(ExternalBalance(source="1c", location_code="WH1", sku="OLD", qty=2))   # 1C no longer lists it
     s.flush()
 
     def row(item, qty):
@@ -59,3 +62,4 @@ def test_onec_sync_adds_cards_that_are_one_item(s, monkeypatch):
     onec.sync(s, onec.OneC(transport=httpx.MockTransport(handler)))
     b = s.scalar(select(ExternalBalance).where(ExternalBalance.source == "1c", ExternalBalance.sku == "010-1"))
     assert b.qty == 5
+    assert s.scalar(select(ExternalBalance).where(ExternalBalance.sku == "OLD")).qty == 0

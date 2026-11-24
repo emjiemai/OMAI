@@ -77,6 +77,12 @@ class Settings(BaseSettings):
                                        self.ops_manager_bot_telegram_bot_token.get_secret_value()} - {""}
 
     @property
+    def public_url(self) -> str:
+        """Where people open OMAI. Render sets RENDER_EXTERNAL_URL on every web service by itself."""
+        import os
+        return (os.getenv("RENDER_EXTERNAL_URL") or WORKSPACE_URL).rstrip("/")
+
+    @property
     def run_scheduler(self) -> bool:
         return self.environment == "production"
 

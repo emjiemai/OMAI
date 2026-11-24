@@ -2,6 +2,9 @@
 
     python -m scripts.setup mapping.xlsx            # sheets: locations, bins, items, users
     python -m scripts.setup --pin otabek 4821       # set a login PIN
+    python -m scripts.setup --add ulugbek "Улуғбек" owner    # add one person; asks for the PIN (not echoed)
+
+Roles: staff, custodian, checker, manager, accountant, owner, it.
 
 Sheet columns are the model fields (omai/models.py), e.g. locations: code, name, kind, sap_whs, billz_shop_id,
 movement_source; users: id, name, role, login, telegram_chat_id, location_code, manager_id. A TRANSIT location is
@@ -39,9 +42,27 @@ def load(path: str) -> None:
             print(f"{sheet}: {len(rows) - 1}")
 
 
+def add(uid: str, name: str, role: str) -> None:
+    from getpass import getpass
+
+    from omai.models import Role
+
+    Role(role)   # unknown role → error
+    pin = getpass("PIN (4+ digits): ")
+    if len(pin) < 4 or pin != getpass("PIN again: "):
+        raise SystemExit("PINs differ or too short")
+    with session_scope() as s:
+        u = s.get(User, uid) or User(id=uid, name=name, role=role)
+        u.name, u.role, u.login, u.pin_hash, u.active = name, role, uid, auth.hash_pin(pin), True
+        s.merge(u)
+    print(f"{uid} ({role}) ready: in Telegram send /login {uid} <PIN>")
+
+
 def main() -> None:
     init_db()
-    if len(sys.argv) == 4 and sys.argv[1] == "--pin":
+    if len(sys.argv) == 5 and sys.argv[1] == "--add":
+        add(sys.argv[2], sys.argv[3], sys.argv[4])
+    elif len(sys.argv) == 4 and sys.argv[1] == "--pin":
         with session_scope() as s:
             u = s.get(User, sys.argv[2])
             u.login = u.login or u.id

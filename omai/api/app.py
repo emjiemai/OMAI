@@ -31,7 +31,9 @@ def _startup() -> None:
     init_db()
     if settings.run_scheduler:
         from omai.routine import start_scheduler
+        from omai.telegram_bot import register_webhook
         app.state.scheduler = start_scheduler()
+        print(f"telegram: {register_webhook()}", flush=True)
 
 
 # ----------------------------------------------------------------- plumbing
@@ -476,7 +478,13 @@ async def telegram_webhook(secret: str, request: Request, s: Session = Depends(d
     expected = settings.derived_secret("telegram")
     if not settings.telegram_configured or not expected or not hmac.compare_digest(secret, expected):
         raise HTTPException(403)
+    from omai.notify import deliver_outbox
     from omai.telegram_bot import handle_update
 
-    handle_update(s, await request.json())
+    upd = await request.json()
+    handle_update(s, upd)
+    deliver_outbox(s)   # reply now, not at the next 5-minute tick
+    cq = upd.get("callback_query")
+    if cq:   # stop the button's spinner (a method returned in the webhook answer)
+        return {"method": "answerCallbackQuery", "callback_query_id": cq["id"]}
     return {"ok": True}

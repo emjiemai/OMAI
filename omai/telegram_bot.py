@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from omai import auth, tasks
-from omai.config import WORKSPACE_URL, settings
+from omai.config import settings
 from omai.db import init_db, session_scope
 from omai.models import OPEN_TASK_STATES, Task, User
 from omai.notify import deliver_outbox, task_buttons, tell
@@ -81,7 +81,7 @@ def _callback(s: Session, cq: dict) -> None:
     if user is None or task is None:
         return
     if action == "submit":
-        tell(s, user, f"Иш саҳифасида сканерлаб топширинг: {WORKSPACE_URL}/?task={tid}")
+        tell(s, user, f"Иш саҳифасида сканерлаб топширинг: {settings.public_url}/?task={tid}")
         return
     try:
         tasks.act(s, task, action, user)
@@ -89,6 +89,30 @@ def _callback(s: Session, cq: dict) -> None:
                        "problem": "⚠ Менежерингизга хабар берилди"}.get(action, "Бажарилди") + f": {task.title}")
     except tasks.TaskError as exc:
         tell(s, user, str(exc))
+
+
+COMMANDS = [{"command": "login", "description": "Чатни улаш: /login логин PIN"},
+            {"command": "tasks", "description": "Очиқ топшириқларим"},
+            {"command": "logout", "description": "Чатни узиш"}]
+
+
+def register_webhook() -> str:
+    """Point OMAI's own bot at this server (production only). Returns a short status for the log — never the token."""
+    if settings.telegram_token_is_company_bot:
+        return "refused: company bot token"
+    if not settings.telegram_configured:
+        return "skipped: OMAI_TELEGRAM_BOT_TOKEN not set"
+    if not settings.public_url.startswith("https://"):
+        return "skipped: no public https address"
+    base = f"https://api.telegram.org/bot{settings.omai_telegram_bot_token.get_secret_value()}"
+    url = f"{settings.public_url}/telegram/webhook/{settings.derived_secret('telegram')}"
+    try:
+        with httpx.Client(timeout=15) as http:
+            r = http.post(f"{base}/setWebhook", json={"url": url, "allowed_updates": ["message", "callback_query"]})
+            http.post(f"{base}/setMyCommands", json={"commands": COMMANDS})
+        return "webhook set" if r.status_code == 200 and r.json().get("ok") else f"webhook failed: HTTP {r.status_code}"
+    except httpx.HTTPError as exc:
+        return f"webhook failed: {type(exc).__name__}"
 
 
 def poll() -> None:

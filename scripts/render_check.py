@@ -57,6 +57,13 @@ def main() -> None:
                     continue
                 names = sorted(v.get("envVar", v).get("key") for v in _get(http, f"/services/{svc['id']}/env-vars"))
                 print(f"  service {svc['name']} ({svc['type']}, {svc['id']}): {len(names)} vars")
+                det = svc.get("serviceDetails") or {}
+                deploys = _get(http, f"/services/{svc['id']}/deploys", limit="1")
+                last = (deploys[0].get("deploy", deploys[0]) if deploys else {})
+                print(f"      url={det.get('url', '-')} repo={svc.get('repo', '-')} branch={svc.get('branch', '-')} "
+                      f"autoDeploy={svc.get('autoDeploy')} suspended={svc.get('suspended')} "
+                      f"lastDeploy={last.get('status', '-')} {str(last.get('commit', {}).get('id', ''))[:7]} "
+                      f"{last.get('finishedAt') or last.get('createdAt') or ''}")
                 for n in names:
                     print(f"      {n}")
             for g in _get(http, "/env-groups", ownerId=owner["id"]):

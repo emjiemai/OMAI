@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="uz-Cyrl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OMAI — ходимлар</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#16181d; --muted:#667085; --line:#e4e7ec; --bad:#c4321c; --ok:#127a43; --accent:#2f5bd3; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111317; --card:#1a1d23; --ink:#e8eaee; --muted:#98a2b3; --line:#2a2f38; --bad:#ff7a66; --ok:#4cc38a; --accent:#7c9cff; } }
+  * { box-sizing:border-box } body { margin:0; font:15px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--ink) }
+  main { padding:16px; max-width:900px; margin:auto } h1 { font-size:20px; margin:4px 0 12px } h2 { font-size:16px; margin:22px 0 8px }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:10px }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center } .grow { flex:1 1 220px }
+  .muted { color:var(--muted); font-size:13px } .bad { color:var(--bad) } .ok { color:var(--ok) }
+  .off { opacity:.55 } .tag { font-size:12px; padding:2px 8px; border-radius:99px; border:1px solid var(--line) }
+  input, select, button { font:inherit; padding:8px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--ink); max-width:100% }
+  button { cursor:pointer } button.primary { background:var(--accent); border-color:var(--accent); color:#fff } button.danger { color:var(--bad) }
+  form.grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:8px }
+  #msg { min-height:20px }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script>
+const app = document.getElementById('app');
+let token = null; try { token = sessionStorage.getItem('omai'); } catch (e) {}
+let data = null;
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function api(method, url, body) {
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+                               body: body ? JSON.stringify(body) : undefined });
+  if (r.status === 401) { login(); throw new Error('login'); }
+  const b = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(b.detail || ('Хато ' + r.status));
+  return b;
+}
+
+function login() {
+  app.innerHTML = `<h1>OMAI — ходимлар</h1><div class="card row"><input id="l" placeholder="Логин" autocomplete="username">
+    <input id="p" type="password" inputmode="numeric" placeholder="PIN" autocomplete="current-password">
+    <button class="primary" id="go">Кириш</button> <span id="e" class="bad"></span></div>`;
+  const go = async () => {
+    const r = await fetch('/auth/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ login: l.value.trim(), pin: p.value }) });
+    const b = await r.json(); if (!r.ok) { e.textContent = b.detail; return; }
+    token = b.token; try { sessionStorage.setItem('omai', token); } catch (x) {} load();
+  };
+  document.getElementById('go').onclick = go;
+  p.onkeydown = ev => { if (ev.key === 'Enter') go(); };
+}
+
+const opts = (list, val, empty) => (empty ? `<option value="">${empty}</option>` : '') +
+  list.map(o => `<option value="${esc(o.value ?? o.code)}" ${String(o.value ?? o.code) === String(val ?? '') ? 'selected' : ''}>${esc(o.label ?? (o.code + ' · ' + o.name))}</option>`).join('');
+
+function render(note) {
+  const d = data;
+  const people = d.users.map(u => `
+    <div class="card ${u.active ? '' : 'off'}" data-id="${esc(u.id)}">
+      <div class="row"><b class="grow">${esc(u.name)} <span class="muted">· ${esc(u.login || u.id)}</span></b>
+        <span class="tag">${esc(u.role_label)}</span>
+        <span class="tag ${u.telegram ? 'ok' : ''}">Telegram: ${u.telegram ? 'уланган' : 'йўқ'}</span>
+        ${u.active ? '' : '<span class="tag bad">блокланган</span>'}</div>
+      <div class="row" style="margin-top:8px">
+        <select data-f="role" ${u.id === d.me ? 'disabled' : ''}>${opts(d.roles, u.role)}</select>
+        <select data-f="location">${opts(d.locations, u.location, 'омбор йўқ')}</select>
+        <button data-a="save">Сақлаш</button>
+        <button data-a="pin">PIN янгилаш</button>
+        ${u.telegram ? '<button data-a="tg">Telegram\'ни узиш</button>' : ''}
+        ${u.id === d.me ? '' : (u.active ? '<button class="danger" data-a="block">Блоклаш</button>' : '<button data-a="unblock">Блокдан чиқариш</button>')}
+      </div>
+      <div class="muted" style="margin-top:6px">Смена ${esc(u.shift)}${u.has_pin ? '' : ' · PIN қўйилмаган'}</div>
+    </div>`).join('');
+  app.innerHTML = `
+    <h1>OMAI — ходимлар</h1>
+    <div id="msg" class="${note && note.bad ? 'bad' : 'ok'}">${esc(note ? note.text : '')}</div>
+    <h2>Янги ходим</h2>
+    <form class="card grid" id="add">
+      <input name="name" placeholder="Исми (кирилл)" required>
+      <input name="login" placeholder="Логин (лотин, масалан otabek)" required>
+      <select name="role">${opts(d.roles, 'staff')}</select>
+      <select name="location">${opts(d.locations, '', 'омбор йўқ')}</select>
+      <input name="pin" type="password" inputmode="numeric" placeholder="PIN (4–12 рақам)" required>
+      <button class="primary">Қўшиш</button>
+    </form>
+    <p class="muted">Ходим Telegram'да @mgmomaibot'га <b>/login логин PIN</b> юборади. Блокланган ходим на ботдан, на саҳифадан фойдалана олади.</p>
+    <h2>Ходимлар (${d.users.filter(u => u.active).length} фаол)</h2>
+    ${people}`;
+}
+
+async function load(note) {
+  try { data = await api('GET', '/admin/users'); render(note); }
+  catch (e) { if (e.message !== 'login') app.innerHTML = `<div class="card bad">${esc(e.message)}</div>`; }
+}
+
+app.addEventListener('submit', async ev => {
+  if (ev.target.id !== 'add') return;
+  ev.preventDefault();
+  const f = Object.fromEntries(new FormData(ev.target));
+  try { const u = await api('POST', '/admin/users', f); load({ text: `${u.name} қўшилди: Telegram'да /login ${u.login} PIN` }); }
+  catch (e) { if (e.message !== 'login') load({ text: e.message, bad: true }); }
+});
+
+app.addEventListener('click', async ev => {
+  const btn = ev.target.closest('button[data-a]'); if (!btn) return;
+  const card = btn.closest('[data-id]'), id = card.dataset.id, u = data.users.find(x => x.id === id);
+  let body = null, done = '';
+  if (btn.dataset.a === 'save') {
+    body = { location: card.querySelector('[data-f=location]').value };
+    const role = card.querySelector('[data-f=role]'); if (!role.disabled) body.role = role.value;
+    done = 'сақланди';
+  } else if (btn.dataset.a === 'pin') {
+    const pin = prompt(`${u.name} учун янги PIN (4–12 рақам):`); if (!pin) return;
+    body = { pin }; done = 'PIN янгиланди';
+  } else if (btn.dataset.a === 'tg') {
+    if (!confirm(`${u.name}нинг Telegram'и узилсинми? Қайта /login қилиши мумкин.`)) return;
+    body = { telegram_off: true }; done = 'Telegram узилди';
+  } else if (btn.dataset.a === 'block') {
+    if (!confirm(`${u.name} блоклансинми? Бот ва саҳифа унга ёпилади.`)) return;
+    body = { active: false }; done = 'блокланди';
+  } else if (btn.dataset.a === 'unblock') {
+    body = { active: true }; done = 'блокдан чиқарилди';
+  }
+  try { await api('PATCH', '/admin/users/' + encodeURIComponent(id), body); load({ text: `${u.name}: ${done}` }); }
+  catch (e) { if (e.message !== 'login') load({ text: e.message, bad: true }); }
+});
+
+token ? load() : login();
+</script>
+</body>
+</html>

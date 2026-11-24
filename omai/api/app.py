@@ -92,6 +92,11 @@ def owner_page() -> FileResponse:
     return FileResponse(STATIC / "owner.html")
 
 
+@app.get("/admin")
+def admin_page() -> FileResponse:
+    return FileResponse(STATIC / "admin.html")
+
+
 @app.get("/health")
 def health(s: Session = Depends(db)) -> dict:
     return {"ok": True, "sources": freshness(s), "at": now_utc().isoformat()}
@@ -437,6 +442,139 @@ def dashboard(user: User = Depends(need(Role.manager, Role.accountant, Role.owne
                        "value": a.value if show_cost else None, "status": a.status}
                       for a in s.scalars(select(Approval).where(Approval.status == "pending"))],
     }
+
+
+# ----------------------------------------------------------------- admin: people and access
+# The owner and IT manage who may use OMAI (web and Telegram). Only the owner gives or changes the roles that approve
+# or see costs (manager, accountant, owner). Nobody blocks or demotes themselves; one active owner always stays.
+ADMIN_ROLES = (Role.owner, Role.it)
+ROLE_UZ = {"staff": "омборчи", "custodian": "дўкон масъули", "checker": "текширувчи", "manager": "менежер",
+           "accountant": "бухгалтер", "owner": "раҳбар", "it": "IT"}
+
+
+def _user_json(u: User) -> dict:
+    return {"id": u.id, "name": u.name, "login": u.login, "role": u.role, "role_label": ROLE_UZ.get(u.role, u.role),
+            "location": u.location_code, "manager_id": u.manager_id, "active": u.active, "on_call": u.on_call,
+            "telegram": bool(u.telegram_chat_id), "has_pin": bool(u.pin_hash),
+            "shift": f"{u.shift_start:%H:%M}–{u.shift_end:%H:%M}", "workdays": u.workdays}
+
+
+def _check_pin(pin: str) -> None:
+    if not (pin.isdigit() and 4 <= len(pin) <= 12):
+        raise HTTPException(400, "PIN 4–12 та рақам бўлсин")
+
+
+def _may_manage(actor: User, role: str) -> None:
+    if Role(actor.role) != Role.owner and Role(role) in APPROVER_ROLES:
+        raise HTTPException(403, "бу лавозимни фақат раҳбар бера олади")
+
+
+def _owners_left(s: Session, without: str) -> int:
+    return len(s.scalars(select(User).where(User.role == Role.owner.value, User.active.is_(True),
+                                            User.id != without)).all())
+
+
+@app.get("/admin/users")
+def admin_users(user: User = Depends(need(*ADMIN_ROLES)), s: Session = Depends(db)) -> dict:
+    from omai.models import Location
+
+    return {"me": user.id, "users": [_user_json(u) for u in s.scalars(select(User).order_by(User.active.desc(), User.name))],
+            "roles": [{"value": r.value, "label": ROLE_UZ[r.value]} for r in Role],
+            "locations": [{"code": loc.code, "name": loc.name} for loc in
+                          s.scalars(select(Location).where(Location.active.is_(True)).order_by(Location.code))]}
+
+
+class NewUserIn(BaseModel):
+    login: str
+    name: str
+    role: str
+    pin: str
+    location: str | None = None
+    manager_id: str | None = None
+
+
+@app.post("/admin/users")
+def admin_add_user(body: NewUserIn, user: User = Depends(need(*ADMIN_ROLES)), s: Session = Depends(db)) -> dict:
+    from omai.ledger import audit
+
+    login_ = body.login.strip().lower()
+    if not login_.replace("_", "").replace(".", "").isalnum() or len(login_) > 32:
+        raise HTTPException(400, "логин: лотин ҳарфлари ва рақамлар, 32 тагача")
+    if body.role not in {r.value for r in Role}:
+        raise HTTPException(400, "лавозим нотўғри")
+    _may_manage(user, body.role)
+    _check_pin(body.pin)
+    if s.get(User, login_) or s.scalar(select(User).where(User.login == login_)):
+        raise HTTPException(409, "бундай логин бор")
+    u = User(id=login_, login=login_, name=body.name.strip()[:120] or login_, role=body.role,
+             pin_hash=auth.hash_pin(body.pin), location_code=body.location or None, manager_id=body.manager_id or None)
+    s.add(u)
+    audit(s, user.id, "user_added", u.id, role=u.role)
+    s.flush()
+    return _user_json(u)
+
+
+class UserChangeIn(BaseModel):
+    name: str | None = None
+    role: str | None = None
+    location: str | None = None
+    manager_id: str | None = None
+    active: bool | None = None
+    on_call: bool | None = None
+    pin: str | None = None
+    telegram_off: bool = False
+
+
+@app.patch("/admin/users/{uid}")
+def admin_change_user(uid: str, body: UserChangeIn, user: User = Depends(need(*ADMIN_ROLES)),
+                      s: Session = Depends(db)) -> dict:
+    from omai.ledger import audit
+
+    u = s.get(User, uid)
+    if u is None:
+        raise HTTPException(404)
+    _may_manage(user, u.role)                       # IT can't touch a manager / accountant / owner
+    changed: list[str] = []
+    if body.role is not None and body.role != u.role:
+        if body.role not in {r.value for r in Role}:
+            raise HTTPException(400, "лавозим нотўғри")
+        if u.id == user.id:
+            raise HTTPException(400, "ўз лавозимингизни ўзгартира олмайсиз")
+        _may_manage(user, body.role)
+        if u.role == Role.owner.value and not _owners_left(s, u.id):
+            raise HTTPException(400, "камида битта раҳбар қолиши керак")
+        u.role = body.role
+        changed.append("role")
+    if body.active is not None and body.active != u.active:
+        if not body.active and u.id == user.id:
+            raise HTTPException(400, "ўзингизни блоклай олмайсиз")
+        if not body.active and u.role == Role.owner.value and not _owners_left(s, u.id):
+            raise HTTPException(400, "камида битта раҳбар қолиши керак")
+        u.active = body.active
+        if not body.active:
+            u.telegram_chat_id = None               # blocked: no more messages, the bot forgets the chat
+        changed.append("active")
+    if body.telegram_off and u.telegram_chat_id:
+        u.telegram_chat_id = None
+        changed.append("telegram")
+    if body.pin is not None:
+        _check_pin(body.pin)
+        u.pin_hash = auth.hash_pin(body.pin)
+        changed.append("pin")
+    for field, attr in (("name", "name"), ("location", "location_code"), ("manager_id", "manager_id"),
+                        ("on_call", "on_call")):
+        value = getattr(body, field)
+        if isinstance(value, str):
+            value = value.strip()[:120] or None
+            if value is None and field == "name":
+                continue                            # a name can't be empty
+        if (value is not None or field in ("location", "manager_id")) and getattr(body, field) is not None \
+                and value != getattr(u, attr):
+            setattr(u, attr, value)
+            changed.append(field)
+    if changed:
+        audit(s, user.id, "user_changed", u.id, fields=changed)   # what changed, never the PIN
+    return _user_json(u)
 
 
 # ----------------------------------------------------------------- integrations

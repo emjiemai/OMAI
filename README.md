@@ -147,6 +147,14 @@ To start again from scratch, delete `omai.db` and repeat step 2. `WORKSPACE_URL`
 8. Outage → stale data, blocked release, recovery task, manual fallback; costs hidden; no self-approval;
    scheduled slots survive restarts.
 
+## People and access (`/admin`)
+
+The owner and IT open `<OMAI address>/admin` and sign in with their login and PIN. There they add people (login,
+name, role, warehouse, PIN), change a role or warehouse, reset a PIN, disconnect someone's Telegram, or **block**
+them: a blocked person can use neither the bot nor the pages, and the bot forgets their chat. Only the owner gives
+the roles that approve or see costs (manager, accountant, owner); nobody blocks or demotes themselves; one active
+owner always stays. Every change is in `audit_log` (what changed, never the PIN).
+
 ## Load warehouses and items
 
 In the Render Shell of omai-api (where the 1C / Billz variables are):

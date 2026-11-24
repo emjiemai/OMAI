@@ -64,7 +64,9 @@ def main() -> None:
                 if flt and flt not in grp["name"].lower():
                     continue
                 detail = _get(http, f"/env-groups/{grp['id']}")[0]
-                names = sorted(v.get("key") for v in detail.get("envVars", []))
+                names = sorted(v.get("envVar", v).get("key") or v.get("name", "?") for v in detail.get("envVars", []))
+                if not names:  # some API versions list them under their own path
+                    names = sorted(v.get("envVar", v).get("key", "?") for v in _get(http, f"/env-groups/{grp['id']}/env-vars"))
                 linked = [s.get("name") or s.get("id") for s in detail.get("serviceLinks", [])]
                 print(f"  env group {grp['name']} ({grp['id']}): {len(names)} vars, used by: {', '.join(linked) or '-'}")
                 for n in names:

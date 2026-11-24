@@ -40,7 +40,7 @@ guessing. Its `CLAUDE.md` and `docs/agent-specs/*.md` are the reference.
   - backups: `BACKUP_SECRET`, `BACKUP_PUBLIC_KEY`.
 - `DATABASE_URL` is **per service** (`fromDatabase`), not in the group, so OMAI's own database URL doesn't clash.
 - OMAI does **not** use `fromGroup: mgmg-shared` (it would hand OMAI every secret above). `render.yaml` sets only the
-  9 variables OMAI reads on the OMAI service. Without the group, the company bot tokens are absent, so
+  10 variables OMAI reads on the OMAI service. Without the group, the company bot tokens are absent, so
   `telegram_token_is_company_bot` can't compare against them: never paste a company bot token into
   `OMAI_TELEGRAM_BOT_TOKEN`.
 - OMAI's own bot token `OMAI_TELEGRAM_BOT_TOKEN` is set on the OMAI service, not in the group. See §6.
@@ -57,11 +57,13 @@ guessing. Its `CLAUDE.md` and `docs/agent-specs/*.md` are the reference.
   - `/webhooks/sap-data/{kind}/{secret}`
   - `/webhooks/sap-push/{secret}`
   - `/webhooks/sap-gateway-push/{tool}/{secret}`
-- **Nothing is pushed to OMAI's `POST /sap/push` today.** Making it arrive means one of these, and **the owner decides
-  which** (don't pick one in code):
-  - (a) add OMAI as a second target in the push script and the gateway PC;
-  - (b) OMAI reads mgmg's Postgres read-only (needs a login role on a view, the pattern of mgmg's `analyst.*` views and
-    `mgmg_analyst_*` roles).
+- **How SAP reaches OMAI: decided 24.11.2026 — (b), OMAI reads mgmg's Postgres read-only** (for now). The login role
+  `omai_reader` may only call four functions in the schema `omai_feed` (`scripts/mgmg_reader.sql`, run once on
+  mgmg-db by its owner): `sap_pushed()`, `sap_stock()` (latest `stock_history` day, no values), `sap_items()` (latest
+  products push, no prices), `sap_moves(since)` (no supplier, totals, comments). Functions with quoted bodies, so they
+  never block a change in mgmg's `schema.sql`. OMAI's side: `omai/connectors/mgmg_feed.py`, `MGMG_SAP_READER_URL` on
+  omai-api. The other way, (a) a second target in the push script (`$OmaiHost`, `POST /sap/data/{kind}`), stays in
+  the code, off.
 - **Row shapes are HANA column names, not Service Layer JSON:**
   - document lines: `DocEntry`, `DocNum`, `DocDate`, `CANCELED`, `LineNum`, `ItemCode`, `Dscription`, `Quantity`,
     `WhsCode`, `LineTotal`, `Currency`, `CardCode`, `CardName`, `CreateDate`, `Comments`;

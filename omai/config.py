@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     dry_run: bool = False               # DRY_RUN=true: nothing is sent out
 
     sap_push_webhook_secret: SecretStr = SecretStr("")   # the SAP gateway machine pushes to POST /sap/push
+    # SAP data read from mgmg's database as omai_reader (scripts/mgmg_reader.sql): postgresql://omai_reader:…@host/db
+    mgmg_sap_reader_url: SecretStr = SecretStr("")
 
     onec_odata_url: str = ""
     onec_login: str = ""
@@ -59,6 +61,10 @@ class Settings(BaseSettings):
     @property
     def onec_configured(self) -> bool:
         return bool(self.onec_odata_url and self.onec_login)
+
+    @property
+    def mgmg_feed_configured(self) -> bool:
+        return bool(self.mgmg_sap_reader_url.get_secret_value())
 
     @property
     def billz_configured(self) -> bool:

@@ -19,8 +19,8 @@ touching a connector, and check the mgmg-agents code before guessing anything ab
 - **SAP:** never connect to HANA directly or ask for its credentials. Data leaves SAP only through the gateway's
   fixed tools.
 - **1C** is GET-only: at most 3 reads at once, catalogs cached.
-- Open design decisions are the owner's. Examples: how SAP data reaches OMAI, the 1C ↔ SAP item mapping, which bot
-  OMAI uses. Write the options, don't pick one in code.
+- Open design decisions are the owner's. Examples: the 1C ↔ SAP item mapping, which 1C склад is which SAP warehouse,
+  the pilot. Write the options, don't pick one in code. (Decided: SAP reaches OMAI by reading mgmg's database, 24.11.)
 
 ## Rules that must not be undone
 - Stock changes only through `ledger.record` (movements with a unique `idem_key`). Never add an editable quantity column.

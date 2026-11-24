@@ -80,11 +80,11 @@ def every_5(s: Session) -> dict:
 
 
 def every_15(s: Session) -> dict:
-    from omai.connectors import billz, onec
+    from omai.connectors import billz, mgmg_feed, onec
 
     out: dict = {}
-    for name, ok, fn in (("billz", settings.billz_configured,
-                                                                          billz.sync),
+    for name, ok, fn in (("sap", settings.mgmg_feed_configured, mgmg_feed.sync),
+                         ("billz", settings.billz_configured, billz.sync),
                          ("1c", settings.onec_configured, onec.sync)):
         if not ok:
             continue

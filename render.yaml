@@ -27,6 +27,8 @@ services:
         sync: false
       - key: SAP_PUSH_WEBHOOK_SECRET     # same value as in mgmg-shared
         sync: false
+      - key: MGMG_SAP_READER_URL         # omai_reader on mgmg-db (scripts/mgmg_reader.sql), read-only
+        sync: false
       - key: ONEC_ODATA_URL
         value: https://clobus.uz/a/acc313/61458/odata/standard.odata/
       - key: ONEC_LOGIN

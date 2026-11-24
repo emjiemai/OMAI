@@ -78,7 +78,8 @@ Nobody approves their own adjustment; costs and values are shown only to manager
 
 | System | How | Code |
 | --- | --- | --- |
-| SAP Business One | The office SAP gateway's push script (mgmg-agents `scripts/sap-gateway-push/push-ar-aging.ps1`, `$OmaiHost`) sends the rows of `stock_value`, `goods_receipts`, `stock_transfers`, `inventory_moves` to `POST /sap/data/{kind}` (header `X-Omai-Secret: $SAP_PUSH_WEBHOOK_SECRET`) — SAP's HANA column names as they are. A complete `stock_value` push zeroes what SAP no longer lists; cancellation documents undo their original. No serials / batches, deliveries or returns from the gateway yet. OMAI never posts to SAP. | `omai/connectors/sap_b1.py` |
+| SAP Business One | **Now:** read from mgmg's database every 15 min as `omai_reader` (`scripts/mgmg_reader.sql`, `MGMG_SAP_READER_URL`): SAP's item list and latest stock picture; freshness = the gateway's last push. | `omai/connectors/mgmg_feed.py` |
+| SAP (other way, off) | The office SAP gateway's push script (mgmg-agents `scripts/sap-gateway-push/push-ar-aging.ps1`, `$OmaiHost`) sends the rows of `stock_value`, `goods_receipts`, `stock_transfers`, `inventory_moves` to `POST /sap/data/{kind}` (header `X-Omai-Secret: $SAP_PUSH_WEBHOOK_SECRET`) — SAP's HANA column names as they are. A complete `stock_value` push zeroes what SAP no longer lists; cancellation documents undo their original. No serials / batches, deliveries or returns from the gateway yet. OMAI never posts to SAP. | `omai/connectors/sap_b1.py` |
 | 1C | OData, GET only; compared, never booked. This 1C has no trade stock register: stock = `AccountingRegister_Хозрасчетный/Balance` `КоличествоBalance` on accounts 29xx / 10xx / 28xx (`ONEC_STOCK_ACCOUNTS`), item and склад read from the subconto by type. Item → OMAI by `Item.onec_ref`, else 1C «Артикул» = SAP `ItemCode`; склад by `Location.onec_ref`. Chart and catalog kept 30 min. | `omai/connectors/onec.py` |
 | Billz 2.0 | `/v1/auth/login`, `/v1/product-general-table` by position, one day per call (sales, returns → quarantine). Stock: `/v2/products` → `shop_measurement_values` (checked live 23.11.2026: 1451 products, `active_measurement_value` per shop). | `omai/connectors/billz.py` |
 | Release approval | the accountant / owner (CASH's role) approves in OMAI | `POST /orders/{ref}/release` |
@@ -96,7 +97,7 @@ cp .env.example .env
 .venv/bin/python -m pytest -q
 ```
 
-Deploy: Render Blueprint (`render.yaml`) — Postgres + one always-on API that runs the schedule, with only the variables OMAI reads set on the service (no `mgmg-shared` group): `ENVIRONMENT`, `TZ`, `DRY_RUN`, `OMAI_TELEGRAM_BOT_TOKEN`, `SAP_PUSH_WEBHOOK_SECRET`, `ONEC_ODATA_URL`, `ONEC_LOGIN`, `ONEC_PASSWORD`, `BILLZ_SECRET_TOKEN`; `DATABASE_URL` comes from OMAI's own database. Or
+Deploy: Render Blueprint (`render.yaml`) — Postgres + one always-on API that runs the schedule, with only the variables OMAI reads set on the service (no `mgmg-shared` group): `ENVIRONMENT`, `TZ`, `DRY_RUN`, `OMAI_TELEGRAM_BOT_TOKEN`, `SAP_PUSH_WEBHOOK_SECRET`, `MGMG_SAP_READER_URL`, `ONEC_ODATA_URL`, `ONEC_LOGIN`, `ONEC_PASSWORD`, `BILLZ_SECRET_TOKEN`; `DATABASE_URL` comes from OMAI's own database. Or
 `docker compose up`.
 
 ## Test it locally (before production)
@@ -160,7 +161,7 @@ python -m scripts.load_master --link G.A._01 billz=<shop id>
 ## Still to do before go-live
 
 * Fill the location & SKU mapping (SAP WhsCode, Billz shop id, 1C Ref_Key) and the ABC groups.
-* SAP: copy the push script from mgmg-agents to the gateway PC and fill in `$OmaiHost`; for serials / batches, deliveries and returns a new gateway tool is needed (+ HANA SELECT grants).
+* SAP: run `scripts/mgmg_reader.sql` on mgmg-db and set `MGMG_SAP_READER_URL`; for serials / batches, deliveries and returns a new gateway tool is needed (+ HANA SELECT grants).
 * 1C: set each location's `onec_ref` (the 1C склад `Ref_Key`); finance confirms `ONEC_STOCK_ACCOUNTS` and fixes the «Артикул» of items that don't carry the SAP code.
 * Confirm the Billz stock endpoint for our plan.
 * Baseline count of the pilot warehouse, then one store transfer route; expand after acceptance.

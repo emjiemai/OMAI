@@ -70,7 +70,8 @@ class OneC:
 
     def listing(self, entity: str, select_: str, timeout: float | None = None) -> list[dict]:
         """A catalog / the chart: kept ``KEEP_SECONDS``; a failed or slow read falls back to the older copy."""
-        kept = _kept.get(entity)
+        key = f"{entity}?{select_}"
+        kept = _kept.get(key)
         if kept and time.monotonic() - kept[0] < KEEP_SECONDS:
             return kept[1]
         try:
@@ -79,7 +80,7 @@ class OneC:
             if kept:
                 return kept[1]
             raise
-        _kept[entity] = (time.monotonic(), rows)
+        _kept[key] = (time.monotonic(), rows)
         return rows
 
 
@@ -122,6 +123,7 @@ def sync(s: Session, client: OneC | None = None, at: datetime | None = None) -> 
         known_whs = {loc.onec_ref for loc in s.scalars(select(Location).where(Location.onec_ref.is_not(None)))}
         missing_items: set[str] = set()
         missing_whs: set[str] = set()
+        totals: dict[tuple[str, str], float] = defaultdict(float)   # several 1C cards can be one OMAI item
         for (whs, ref), q in positions.items():
             item = by_ref.get(ref) or by_sap.get(articles.get(ref, "") or "\0")
             if not whs:
@@ -133,7 +135,9 @@ def sync(s: Session, client: OneC | None = None, at: datetime | None = None) -> 
             if item is None:
                 missing_items.add(ref)
                 continue
-            stats["mapped"] += set_external_balance(s, "1c", whs, item.sku, q)
+            totals[(whs, item.sku)] += q
+        for (whs, sku), q in totals.items():
+            stats["mapped"] += set_external_balance(s, "1c", whs, sku, q)
         stats["unmapped_items"], stats["unmapped_warehouses"] = len(missing_items), len(missing_whs)
         mark_success(s, "1c")
         return stats

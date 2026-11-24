@@ -146,6 +146,17 @@ To start again from scratch, delete `omai.db` and repeat step 2. `WORKSPACE_URL`
 8. Outage → stale data, blocked release, recovery task, manual fallback; costs hidden; no self-approval;
    scheduled slots survive restarts.
 
+## Load warehouses and items
+
+In the Render Shell of omai-api (where the 1C / Billz variables are):
+
+```bash
+python -m scripts.load_master                       # look only: counts, 1C склады, Billz shops
+python -m scripts.load_master --apply               # the 18 SAP warehouses + the 1C items with an Артикул
+python -m scripts.load_master --link 01 onec=cce7ceea     # warehouse 01 = this 1C склад
+python -m scripts.load_master --link G.A._01 billz=<shop id>
+```
+
 ## Still to do before go-live
 
 * Fill the location & SKU mapping (SAP WhsCode, Billz shop id, 1C Ref_Key) and the ABC groups.

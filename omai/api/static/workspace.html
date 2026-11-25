@@ -89,8 +89,8 @@ async function countView(t) {
   const form = await api(`/counts/${cid}/form`);
   app.innerHTML = `<div class="card"><b>${esc(t.title)}</b>
     <p class="muted">Кўрганингизни ёзинг. <b>0</b> = санадим, бўш. Фақат санамаган бўлсангиз бўш қолдиринг.
-    Scan serials separated by spaces.</p>
-    <table>${form.map(f => `<tr><td>${esc(f.bin)}</td><td>${esc(f.sku === '*' ? '(бўш бўлиши керак)' : f.sku)} ${esc(f.lot)}</td>
+    Серия рақамларини бўш жой билан ажратиб сканерланг.</p>
+    <table>${form.map(f => `<tr><td>${f.bin ? esc(f.bin) : 'бутун омбор'}</td><td>${esc(f.sku === '*' ? '(бўш бўлиши керак)' : f.sku)} ${esc(f.lot)}${f.name ? '<br><span class="muted">' + esc(f.name) + '</span>' : ''}</td>
       <td><input data-line="${f.line_id}" inputmode="decimal"></td><td><input data-serials="${f.line_id}" placeholder="серия рақамлари"></td></tr>`).join('')}</table>
     <p class="muted">Рўйхатда йўқ нарса топдингизми? Ячейка, артикул, миқдор:</p>
     <input id="extra" placeholder="G01 GARMIN-123 2">

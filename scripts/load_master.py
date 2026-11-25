@@ -14,9 +14,10 @@ plus Billz's login). Prints counts and the склад / shop names needed for li
   stays ``sap`` (the model default): nothing is booked until SAP pushes, and the pilot warehouse is switched to
   ``omai`` when its baseline count starts.
 * Items: every 1C item that has stock now on the stock accounts (29xx / 10xx / 28xx). The SKU is its «Артикул»,
-  taken as the SAP ``ItemCode`` (the rule ``omai/connectors/onec.py`` already uses). Items without an Артикул, or
-  Several 1C cards with one Артикул become one item (see ``plan_items``). Items without an Артикул are **not**
-  loaded, only counted: the 1C ↔ SAP item mapping for them is the owner's to settle with finance. Re-running is safe: existing items keep their data, empty fields are filled.
+  taken as the SAP ``ItemCode`` (the rule ``omai/connectors/onec.py`` already uses). Several 1C cards with one
+  Артикул become one item (see ``plan_items``). Items without an Артикул are **not** loaded, only counted: the
+  1C ↔ SAP item mapping for them is the owner's to settle with finance. Re-running is safe: existing items keep
+  their data, empty fields are filled.
 """
 
 from __future__ import annotations

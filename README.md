@@ -171,7 +171,16 @@ python -m scripts.load_master --pilot 01            # look only
 python -m scripts.load_master --pilot 01 --apply    # OMAI's book starts from SAP's stock at 01; staff scans rule 01
 ```
 
-From then on every movement in or out of 01 is scanned in OMAI; the baseline blind count checks the opening book.
+From then on every movement in or out of 01 is scanned in OMAI; the baseline blind count checks the opening book:
+
+```bash
+python -m scripts.count_day count 01 otabek dilshod 2026-11-28T18:00   # counter, checker (not the counter), deadline
+python -m scripts.count_day show 01                                   # where the counts stand (counts only)
+python -m scripts.count_day bins 01 G01-G20 FLOOR                     # shelves, for putting the stock away after
+```
+
+The baseline is counted **by item across the whole warehouse** ("бутун омбор"): after the switch nothing is on a shelf
+yet. The form shows each item's code and name, never a quantity.
 
 ## Load warehouses and items
 

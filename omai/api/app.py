@@ -330,7 +330,11 @@ def count_form(cid: str, user: User = Depends(current_user), s: Session = Depend
     c = _count(s, cid)
     if c.status == "open" and user.id == c.counter_id:
         counting.start(s, c)
-    return counting.blind_form(c)
+    from omai.models import Item
+
+    form = counting.blind_form(c)
+    names = {i.sku: i.name for i in s.scalars(select(Item).where(Item.sku.in_({f["sku"] for f in form})))}
+    return [{**f, "name": names.get(f["sku"], "")} for f in form]   # names help find the goods; still no quantities
 
 
 class CountEntries(BaseModel):

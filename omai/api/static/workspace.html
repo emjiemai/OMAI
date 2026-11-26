@@ -75,9 +75,10 @@ async function tasksView() {
 async function act(t, a) {
   try {
     if (a === 'submit' && (t.kind === 'count' || t.kind === 'recount') && t.ref) return countView(t);
+    if (a === 'submit' && t.kind === 'shelving' && t.location) return shelvingView(t);
     let note = '';
-    if (a === 'help' || a === 'problem') { note = prompt('What is the problem?') || ''; }
-    const evidence = a === 'submit' ? { note: prompt('What was done? (scans are recorded separately)') || 'done' } : null;
+    if (a === 'help' || a === 'problem') { note = prompt('Нима муаммо? Қисқа ёзинг:') || ''; }
+    const evidence = a === 'submit' ? { note: prompt('Нима қилинди? (сканерлар алоҳида сақланади)') || 'бажарилди' } : null;
     await api(`/tasks/${t.id}/${a}`, { method:'POST', body: JSON.stringify({ note, evidence }) });
     tasksView();
   } catch (e) { alert(e.message); }
@@ -109,6 +110,33 @@ async function countView(t) {
       await api(`/tasks/${t.id}/submit`, { method:'POST', body: JSON.stringify({ evidence: { count: cid, lines: entries.length } }) });
       tasksView();
     } catch (e) { alert(e.message); }
+  };
+}
+
+// Shelving after the pilot's baseline count: item + shelf + quantity per scan. No book quantity is shown.
+const scanId = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).slice(2));
+async function shelvingView(t, note) {
+  const d = await api(`/shelving/${encodeURIComponent(t.location)}`);
+  if (!d.items.length) { alert('Ҳамма товар жойлашди. Раҳмат!'); return tasksView(); }
+  app.innerHTML = `<div class="card"><b>${esc(t.title)}</b>
+    <p class="muted">Товарни ва ячейкани сканерланг, қўйган миқдорингизни ёзинг. Қолди: <b>${d.items.length}</b> та товар.</p>
+    <div id="note" class="${note && note.bad ? 'over' : 'muted'}">${esc(note ? note.text : '')}</div>
+    <input id="sku" list="skus" placeholder="Товар (артикул)" autocomplete="off"><br><br>
+    <input id="bin" list="bins" placeholder="Ячейка" autocomplete="off"><br><br>
+    <input id="qty" inputmode="decimal" placeholder="Миқдор"><br><br>
+    <datalist id="skus">${d.items.map(i => `<option value="${esc(i.sku)}">${esc(i.name)}</option>`).join('')}</datalist>
+    <datalist id="bins">${d.bins.map(b => `<option value="${esc(b)}">`).join('')}</datalist>
+    <button class="primary" id="put">Жойладим</button> <button id="back">Орқага</button>
+    <p class="muted">Ячейкасиз қолганлар:</p>
+    <table>${d.items.map(i => `<tr><td>${esc(i.sku)}</td><td class="muted">${esc(i.name)}</td></tr>`).join('')}</table></div>`;
+  document.getElementById('back').onclick = tasksView;
+  document.getElementById('put').onclick = async () => {
+    const body = { sku: sku.value.trim(), bin: bin.value.trim(), qty: Number(qty.value), scan_id: scanId() };
+    if (!body.sku || !body.bin || !(body.qty > 0)) return shelvingView(t, { text: 'Товар, ячейка ва миқдорни тўлдиринг.', bad: true });
+    try {
+      const r = await api(`/shelving/${encodeURIComponent(t.location)}`, { method:'POST', body: JSON.stringify(body) });
+      shelvingView(t, { text: `${body.qty} × ${body.sku} → ${body.bin.toUpperCase()} жойлашди. Қолди: ${r.items_left} та товар.` });
+    } catch (e) { shelvingView(t, { text: e.message, bad: true }); }
   };
 }
 

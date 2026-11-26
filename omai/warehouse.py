@@ -15,7 +15,7 @@ from omai import tasks
 from omai.ledger import (TRANSIT, Line, StockError, allocated, audit, balance, positions, raise_exception, record,
                          resolve_exception)
 from omai.models import (Allocation, Bin, Condition, DispatchOrder, ExpectedReceipt, Item, Location, Movement,
-                         MovementLine, Ownership, ReturnCase, Role, Transfer, User, now_utc)
+                         MovementLine, Ownership, ReturnCase, Role, Task, Transfer, User, now_utc)
 from omai.sources import stale_critical
 
 DOCK = "DOCK"     # receiving area bin, before put-away
@@ -156,6 +156,66 @@ def putaway(s: Session, *, task_ref: str, sku: str, qty: float, location: str, s
         t.state, t.accepted_by = "accepted", None  # scan of item + bin is the evidence (approved auto-accept rule)
         t.evidence = [*t.evidence, {"bin": scanned_bin, "qty": qty, "by": actor.id, "auto": True}]
     return {"movement": res.movement.id, "created": res.created}
+
+
+# ----------------------------------------------------------------- shelving (after the pilot's baseline count)
+UNSHELVED = ""    # the pilot's opening stock arrives without a shelf
+
+
+def _count_open(s: Session, location: str) -> bool:
+    from omai.models import Count
+    return s.scalar(select(Count.id).where(Count.location_code == location,
+                                           Count.status.in_(["open", "counting"]))) is not None
+
+
+def unshelved(s: Session, location: str) -> list[dict]:
+    """Items still without a shelf at ``location`` — codes and names only, never quantities."""
+    skus = sorted({p["sku"] for p in positions(s, loc=location, cond=S) if p["bin"] == UNSHELVED and p["qty"] > 0})
+    names = {i.sku: i.name for i in s.scalars(select(Item).where(Item.sku.in_(skus)))} if skus else {}
+    return [{"sku": k, "name": names.get(k, "")} for k in skus]
+
+
+def shelve(s: Session, *, location: str, sku: str, qty: float, scanned_bin: str, actor: User, scan_id: str,
+           lot: str = "") -> dict:
+    """One scan: ``qty`` × ``sku`` from "no shelf" onto ``scanned_bin``. ``scan_id`` (from the page) makes a resent
+    scan count once while a second real scan of the same item to the same shelf still counts."""
+    if _count_open(s, location):
+        raise StockError(f"{location} да санаш очиқ: жойлаш санаш ёпилгандан кейин")
+    if not scan_id or len(scan_id) > 64:
+        raise StockError("сканер рақами йўқ")
+    done = s.scalar(select(Movement).where(
+        Movement.idem_key == f"omai:putaway:shelve:{location}:{scan_id}:{scanned_bin}"))
+    if done is not None:                     # the page resent this scan: it already counted
+        return {"movement": done.id, "created": False, "items_left": len(unshelved(s, location))}
+    try:
+        res = putaway(s, task_ref=f"shelve:{location}:{scan_id}", sku=sku, qty=qty, location=location,
+                      scanned_bin=scanned_bin, actor=actor, lot=lot, from_bin=UNSHELVED)
+    except StockError as exc:
+        if "кутмоқда" in str(exc):   # putaway's message carries the book quantity: not shown here
+            raise StockError(f"Ячейкасиз {sku} сиз ёзгандан кам. Миқдорни текширинг ёки менежерга айтинг.") from None
+        raise
+    left = unshelved(s, location)
+    if not left:
+        for t in tasks.open_for_ref(s, f"shelve:{location}", "shelving"):
+            t.state, t.accepted_by = "accepted", None   # nothing left without a shelf: the scans are the evidence
+            t.evidence = [*t.evidence, {"done": True, "by": actor.id, "auto": True}]
+    return {**res, "items_left": len(left)}
+
+
+def shelving_task(s: Session, location: str, assignee: User, deadline: datetime) -> Task:
+    if _count_open(s, location):
+        raise StockError(f"{location} да санаш очиқ: аввал уни ёпинг")
+    if not s.scalar(select(Bin.id).where(Bin.location_code == location, Bin.active.is_(True))):
+        raise StockError(f"{location} да ячейка йўқ: аввал ячейкаларни қўшинг")
+    if tasks.open_for_ref(s, f"shelve:{location}", "shelving"):
+        raise StockError(f"{location} учун жойлаш топшириғи аллақачон бор")
+    n = len(unshelved(s, location))
+    if not n:
+        raise StockError(f"{location} да ячейкасиз товар йўқ")
+    return tasks.create(s, kind="shelving", title=f"{location}: товарларни ячейкаларга жойлаш ({n} та товар)",
+                        deadline=deadline, assignee_id=assignee.id, location=location, ref=f"shelve:{location}",
+                        result_required="Товарни ва ячейкани сканерланг, қўйган миқдорингизни ёзинг. Ҳамма товар "
+                                        "жойлашгач, топшириқ ўзи ёпилади.")
 
 
 # ----------------------------------------------------------------- allocation, picking, dispatch

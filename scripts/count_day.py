@@ -4,6 +4,8 @@
     python -m scripts.count_day count 01 otabek dilshod 2026-11-28T18:00
                                                                 # the baseline count: counter, checker, deadline
     python -m scripts.count_day show 01                         # the warehouse's counts (counts only)
+    python -m scripts.count_day shelve 01 otabek 2026-11-29T18:00
+                                                                # after the count: put the stock onto shelves
 
 Run in the omai-api Shell. Order on count day: ``load_master --pilot 01 --apply`` first (OMAI's book starts from
 SAP's stock), then ``count``.
@@ -102,6 +104,20 @@ def main() -> None:
             c = baseline(s, args[1], args[2], args[3], deadline)
             print(f"baseline count {c.id[:8]} for {args[1]}: {len(c.lines)} items to count; "
                   f"the counter got the task in Telegram")
+        elif len(args) == 4 and args[0] == "shelve":
+            from omai.ledger import StockError
+            from omai.warehouse import shelving_task
+
+            deadline = datetime.fromisoformat(args[3])
+            deadline = deadline if deadline.tzinfo else deadline.replace(tzinfo=settings.tz)
+            who = s.scalar(select(User).where(User.login == args[2].lower(), User.active.is_(True)))
+            if who is None:
+                raise SystemExit(f"{args[2]!r}: no active person with this login (add them on /admin)")
+            try:
+                t = shelving_task(s, args[1], who, deadline)
+            except StockError as exc:
+                raise SystemExit(str(exc)) from None
+            print(f"shelving task for {args[1]} sent to {who.login}: {t.title}")
         elif len(args) == 2 and args[0] == "show":
             print("\n".join(show(s, args[1])))
         else:

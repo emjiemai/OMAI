@@ -177,7 +177,12 @@ From then on every movement in or out of 01 is scanned in OMAI; the baseline bli
 python -m scripts.count_day count 01 otabek dilshod 2026-11-28T18:00   # counter, checker (not the counter), deadline
 python -m scripts.count_day show 01                                   # where the counts stand (counts only)
 python -m scripts.count_day bins 01 G01-G20 FLOOR                     # shelves, for putting the stock away after
+python -m scripts.count_day shelve 01 otabek 2026-11-29T18:00         # after the count closes: shelving task
 ```
+
+Shelving (workspace → the task → Топшириш): scan the item and the shelf, type the quantity put there. Each scan is
+one movement from "no shelf" to the shelf (a resent scan counts once); only codes and names are shown, never a
+quantity, and shelving is refused while a count is open. The task closes itself when nothing is left without a shelf.
 
 The baseline is counted **by item across the whole warehouse** ("бутун омбор"): after the switch nothing is on a shelf
 yet. The form shows each item's code and name, never a quantity.

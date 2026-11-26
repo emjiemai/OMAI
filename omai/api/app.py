@@ -198,6 +198,30 @@ class PutawayIn(BaseModel):
     lot: str = ""
 
 
+class ShelveIn(BaseModel):
+    sku: str
+    qty: float
+    bin: str
+    scan_id: str
+    lot: str = ""
+
+
+@app.get("/shelving/{loc}")
+def shelving_list(loc: str, user: User = Depends(current_user), s: Session = Depends(db)) -> dict:
+    """What still has no shelf (codes and names, no quantities) and the shelves to choose from."""
+    from omai.models import Bin
+
+    return {"items": warehouse.unshelved(s, loc),
+            "bins": [b.code for b in s.scalars(select(Bin).where(Bin.location_code == loc, Bin.active.is_(True))
+                                               .order_by(Bin.code))]}
+
+
+@app.post("/shelving/{loc}")
+def shelving_scan(loc: str, body: ShelveIn, user: User = Depends(current_user), s: Session = Depends(db)) -> dict:
+    return guard(warehouse.shelve, s, location=loc, sku=body.sku.strip(), qty=body.qty,
+                 scanned_bin=body.bin.strip().upper(), actor=user, scan_id=body.scan_id, lot=body.lot.strip())
+
+
 @app.post("/putaway")
 def putaway(body: PutawayIn, user: User = Depends(current_user), s: Session = Depends(db)) -> dict:
     return guard(warehouse.putaway, s, actor=user, **body.model_dump())

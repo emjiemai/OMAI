@@ -81,11 +81,30 @@ guessing. Its `CLAUDE.md` and `docs/agent-specs/*.md` are the reference.
     - goods receipts OPDN, transfers OWTR, goods receipts / issues OIGN / OIGE (45 days each);
     - open sales-order lines.
 - **Not exported:** deliveries ODLN and returns ORDN.
-- In mgmg's DB (read-only check, 23.11):
-  - **`stock_history`** holds the daily stock picture per item × warehouse (`on_hand`, `stock_value_usd`). It starts
-    16.11.2026 and covers 813 items.
-  - **`stock_moves` is EMPTY.** The OPDN/OWTR/OIGN/OIGE tools aren't arriving yet: either the gateway PC wasn't
-    updated with `history.js`, or the HANA user lacks SELECT on those 9 tables (`docs/sap-gateway-tools.md` §F4).
+- **SAP ↔ backend timeline** (what mgmg-agents did; details in its README §10 and `docs/sap-gateway-tools.md`):
+  - 08.2026: push script (PowerShell) calls the gateway's 8 original tools, at most 100 rows each.
+  - 03.10: complete tools (every row, no cap) → `/webhooks/sap-data/{kind}`; a rejected push counts as a failure.
+  - 09.10: the gateway's source moved into mgmg-agents `sap-gateway/`; supplier balances, credit notes, so'm totals.
+  - 16.10: every kind the owner's plan needs as a complete tool (customers, items, orders, payments in/out, open
+    purchase invoices and orders, sales people, equipment, service calls/contracts, item sales 90 days).
+  - 03.11: sales lines carry `SlpName` (salesperson) and `UserName` (who entered it in SAP).
+  - 16.11: `history.js` — goods receipts OPDN, transfers OWTR, goods receipts / issues OIGN / OIGE, open sales-order
+    lines RDR1; mgmg keeps `stock_moves` (2 years) and `stock_history` (one stock picture a day, from 16.11).
+  - 23.11: optional second push target for OMAI (`$OmaiHost`) — **not used**: 24.11 OMAI chose to read mgmg-db
+    (`omai_reader`, above).
+  - 27.11: the push script reads its settings from `push-settings.ps1` beside it (a newer script replaces the old one
+    as it is); `$OmaiHost` stays `PASTE_OMAI_HOST_HERE` (filling it in only gives «push failed» warnings).
+    **The gateway PC was updated the same day** (`src/` + HANA SELECT grants on the 9 history tables): the history
+    tools arrive for the first time.
+- In mgmg's DB (read-only check, 27.11.2026, after the gateway update):
+  - **`stock_moves` is filled** (the last 45 days on the first push, then every 30 min): `receipt` 164 lines
+    (14.10–19.11), `transfer` 317 (13.10–25.11), `goods_issue` 6, `goods_receipt` 3. So `omai_feed.sap_moves(since)`
+    now returns rows — OMAI's SAP movements for SAP-authority locations and the system-mismatch checks have data.
+  - **`stock_history`**: the daily stock picture per item × warehouse from 16.11.2026 (`omai_feed.sap_stock()` reads
+    the latest day).
+  - **Open sales-order lines** (`analyst.sap_so_open_lines`, 27 lines) arrive too, but **are not in `omai_feed`**:
+    OMAI's dispatch orders from SAP would need a fifth function in `scripts/mgmg_reader.sql` (owner decision).
+  - Still **no serials / batches, deliveries ODLN or returns ORDN** from the gateway.
 - **Warehouse codes (SAP, live):**
   - `01` Asosiy omborxona (main)
   - `02` Bojxona (customs)

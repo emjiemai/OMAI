@@ -58,9 +58,9 @@ guessing. Its `CLAUDE.md` and `docs/agent-specs/*.md` are the reference.
   - `/webhooks/sap-push/{secret}`
   - `/webhooks/sap-gateway-push/{tool}/{secret}`
 - **How SAP reaches OMAI: decided 24.11.2026 — (b), OMAI reads mgmg's Postgres read-only** (for now). The login role
-  `omai_reader` may only call four functions in the schema `omai_feed` (`scripts/mgmg_reader.sql`, run once on
+  `omai_reader` may only call five functions in the schema `omai_feed` (`scripts/mgmg_reader.sql`, run once on
   mgmg-db by its owner): `sap_pushed()`, `sap_stock()` (latest `stock_history` day, no values), `sap_items()` (latest
-  products push, no prices), `sap_moves(since)` (no supplier, totals, comments). Functions with quoted bodies, so they
+  products push, no prices), `sap_moves(since)` (no supplier, totals, comments), `sap_orders()` (open sales-order lines, no customer or price; 27.11). Functions with quoted bodies, so they
   never block a change in mgmg's `schema.sql`. OMAI's side: `omai/connectors/mgmg_feed.py`, `MGMG_SAP_READER_URL` on
   omai-api. The other way, (a) a second target in the push script (`$OmaiHost`, `POST /sap/data/{kind}`), stays in
   the code, off.
@@ -102,8 +102,9 @@ guessing. Its `CLAUDE.md` and `docs/agent-specs/*.md` are the reference.
     now returns rows — OMAI's SAP movements for SAP-authority locations and the system-mismatch checks have data.
   - **`stock_history`**: the daily stock picture per item × warehouse from 16.11.2026 (`omai_feed.sap_stock()` reads
     the latest day).
-  - **Open sales-order lines** (`analyst.sap_so_open_lines`, 27 lines) arrive too, but **are not in `omai_feed`**:
-    OMAI's dispatch orders from SAP would need a fifth function in `scripts/mgmg_reader.sql` (owner decision).
+  - **Open sales-order lines** (27 lines, 11 orders, 2 warehouses on 27.11): `omai_feed.sap_orders()` — the fifth
+    function, installed on mgmg-db 27.11.2026 (no customer, prices or totals). OMAI makes one dispatch order «SAP
+    <DocNum>» per order × warehouse, waiting for release (`omai/connectors/mgmg_feed.py` → `sync_orders`).
   - Still **no serials / batches, deliveries ODLN or returns ORDN** from the gateway.
 - **Warehouse codes (SAP, live):**
   - `01` Asosiy omborxona (main)

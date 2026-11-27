@@ -1,7 +1,7 @@
 """SAP Business One, read from mgmg's database — option (b) of docs/backend.md §3, chosen by the owner 24.11.2026.
 
 mgmg-api already receives the SAP gateway's push every 30 min and keeps it (``stock_history``,
-``sap_gateway_snapshots``). OMAI reads it as the login role ``omai_reader``, which may only call four fixed functions
+``sap_gateway_snapshots``). OMAI reads it as the login role ``omai_reader``, which may only call five fixed functions
 in the schema ``omai_feed`` (``scripts/mgmg_reader.sql``): no tables, no writes, read-only transactions, 20 s per
 query. They return codes, names, warehouse codes and quantities — never prices or values.
 
@@ -15,8 +15,14 @@ Every 15 min (``routine.every_15``):
 * **Freshness:** the time of the gateway's last stock push, not the time OMAI read it — if the gateway PC stops, OMAI
   sees SAP go stale even though mgmg's database still answers.
 
-Movement lines (``omai_feed.sap_moves``) are not booked yet: mgmg's ``stock_moves`` is empty until the gateway PC runs
-``history.js``, and booking SAP movements needs an opening balance for each ``movement_source = sap`` location first.
+* **Open sales orders** (``omai_feed.sap_orders``, since 27.11.2026): each SAP order × warehouse → one
+  ``DispatchOrder`` «SAP <DocNum>» (``-<warehouse>`` when one order ships from several), lines = what is still to
+  deliver (``OpenQty``). No customer name or price comes through. A new order waits for its release (CASH / the
+  approver) like any other — no pick task before that. An order SAP no longer lists (delivered or closed there) that
+  OMAI hasn't started: ``closed_in_sap``; one already released: an exception for the manager, never closed silently.
+
+Movement lines (``omai_feed.sap_moves``) are counted, not booked yet: booking SAP movements needs an opening balance
+for each ``movement_source = sap`` location first. They arrive since the gateway PC update of 27.11.2026.
 """
 
 from __future__ import annotations
@@ -29,7 +35,7 @@ from sqlalchemy.orm import Session
 
 from omai.config import settings
 from omai.connectors.sap_b1 import ingest_stock
-from omai.models import Item
+from omai.models import DispatchOrder, Item
 from omai.sources import mark_success
 
 STOCK_TOOLS = ("stock_items", "stock_value")
@@ -56,10 +62,17 @@ def read() -> dict[str, Any]:
                             "FROM omai_feed.sap_items()")
                 items = cur.fetchall()
                 cur.execute("SELECT count(*) FROM omai_feed.sap_moves(current_date - 45)")
-                moves = cur.fetchone()[0]     # a count only: SAP movements arrive once the gateway runs history.js
+                moves = cur.fetchone()[0]     # a count only: booking them needs opening balances first
+                orders = None
+                try:
+                    cur.execute("SELECT doc_entry, doc_num, line_num, whs_code, item_code, open_qty "
+                                "FROM omai_feed.sap_orders()")
+                    orders = cur.fetchall()
+                except psycopg.errors.UndefinedFunction:   # mgmg_reader.sql not re-run yet: orders just skipped
+                    conn.rollback()
     except psycopg.Error as exc:   # the class only: a libpq message can carry the host or the user
         raise FeedError(f"mgmg database: {type(exc).__name__}") from None
-    return {"pushed": pushed, "stock": stock, "items": items, "moves_45d": moves}
+    return {"pushed": pushed, "stock": stock, "items": items, "moves_45d": moves, "orders": orders}
 
 
 def _text(value: object, limit: int) -> str | None:
@@ -94,6 +107,46 @@ def upsert_items(s: Session, items: list[tuple], stock: list[tuple]) -> dict:
     return out
 
 
+ORDER_PREFIX = "SAP "
+
+
+def sync_orders(s: Session, rows: list[tuple]) -> dict:
+    """SAP's open sales-order lines → OMAI dispatch orders (one per order × warehouse)."""
+    from omai.connectors.ingest import upsert_order
+    from omai.ledger import audit, raise_exception
+
+    out = {"orders": 0, "closed_in_sap": 0, "flagged": 0}
+    grouped: dict[tuple, list[dict]] = {}
+    per_doc: dict[object, set] = {}
+    for doc_entry, doc_num, _line, whs, item, open_qty in rows:
+        whs, item = _text(whs, 40), _text(item, 60)
+        if not (doc_entry and whs and item) or not open_qty or float(open_qty) <= 0:
+            continue
+        grouped.setdefault((doc_entry, doc_num or doc_entry, whs), []).append({"sku": item, "qty": float(open_qty)})
+        per_doc.setdefault(doc_entry, set()).add(whs)
+    wanted = set()
+    for (doc_entry, doc_num, whs), lines in grouped.items():
+        ref = f"{ORDER_PREFIX}{doc_num}" + (f"-{whs}" if len(per_doc[doc_entry]) > 1 else "")
+        wanted.add(ref)
+        upsert_order(s, "sap", ref, whs, "", lines)
+        out["orders"] += 1
+    s.flush()
+    for o in s.scalars(select(DispatchOrder).where(DispatchOrder.order_ref.like(f"{ORDER_PREFIX}%"),
+                                                   DispatchOrder.status == "open")):
+        if o.order_ref in wanted:
+            continue
+        if o.release_status == "approved":
+            raise_exception(s, "order_closed_in_sap", o.order_ref,
+                            f"{o.order_ref}: SAP'да ёпилган, OMAI'да эса чиқаришга рухсат берилган — текширинг",
+                            severity="medium")
+            out["flagged"] += 1
+        else:
+            o.status = "closed_in_sap"
+            audit(s, None, "order.closed_in_sap", o.order_ref)
+            out["closed_in_sap"] += 1
+    return out
+
+
 def sync(s: Session, data: dict[str, Any] | None = None) -> dict:
     data = data if data is not None else read()
     pushes = [t for k, t in data["pushed"].items() if k in STOCK_TOOLS and t]
@@ -103,6 +156,8 @@ def sync(s: Session, data: dict[str, Any] | None = None) -> dict:
     rows = [{"ItemCode": c, "WhsCode": w, "OnHand": float(q or 0)} for c, _n, w, q in data["stock"] if c and w]
     # an empty picture is a failed push, not "SAP has nothing": never zero everything on it
     out["stock"] = ingest_stock(s, rows, complete=bool(rows))
+    if data.get("orders") is not None:
+        out["orders"] = sync_orders(s, data["orders"])
     last = max(pushes)
     last = last if last.tzinfo else last.replace(tzinfo=UTC)
     mark_success(s, "sap", at=last.astimezone(UTC))
@@ -117,7 +172,7 @@ def main() -> None:
     data = read()
     ages = {k: round((datetime.now(UTC) - v).total_seconds() / 60) for k, v in data["pushed"].items() if v}
     print(f"stock rows={len(data['stock'])} items={len(data['items'])} SAP movement lines (45 days)="
-          f"{data.get('moves_45d', '?')} last push (min ago)={ages}")
+          f"{data.get('moves_45d', '?')} open order lines={len(data['orders']) if data.get('orders') is not None else '?'} last push (min ago)={ages}")
     if "--sync" in sys.argv:
         from omai.db import init_db, session_scope
 

@@ -6,7 +6,7 @@
 --     \password omai_reader                -- letters and digits only, so it fits in a URL
 -- Safe to run again (it only replaces OMAI's own schema and functions).
 --
--- What omai_reader can do: connect (read-only, 3 connections, 20 s per query) and call the four functions below.
+-- What omai_reader can do: connect (read-only, 3 connections, 20 s per query) and call the five functions below.
 -- Nothing else: no table, no view, no write. The functions return item codes, names, warehouse codes and quantities
 -- only — never prices, values, suppliers, customers or comments (IT sees no company figures).
 --
@@ -67,12 +67,29 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
     FROM stock_moves m WHERE m.doc_date >= since
 $$;
 
+-- Open customer sales-order LINES (ORDR + RDR1, the latest so_open_lines push; 27.11.2026): what is still to deliver,
+-- from which warehouse. No customer, prices or totals — OMAI shows the SAP order number.
+CREATE OR REPLACE FUNCTION omai_feed.sap_orders()
+RETURNS TABLE (doc_entry bigint, doc_num bigint, line_num integer, doc_date date, due_date date, ship_date date,
+               item_code text, item_name text, whs_code text, quantity numeric, open_qty numeric,
+               captured_at timestamptz)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public, pg_temp AS $$
+    SELECT nullif(s.raw->>'DocEntry', '')::numeric::bigint, nullif(s.raw->>'DocNum', '')::numeric::bigint,
+           nullif(s.raw->>'LineNum', '')::numeric::integer,
+           nullif(left(s.raw->>'DocDate', 10), '')::date, nullif(left(s.raw->>'DocDueDate', 10), '')::date,
+           nullif(left(s.raw->>'ShipDate', 10), '')::date,
+           s.raw->>'ItemCode', s.raw->>'Dscription', s.raw->>'WhsCode',
+           nullif(s.raw->>'Quantity', '')::numeric, nullif(s.raw->>'OpenQty', '')::numeric, s.captured_at
+    FROM v_sap_gateway_latest s WHERE s.tool = 'so_open_lines'
+$$;
+
 REVOKE ALL ON FUNCTION omai_feed.sap_pushed(), omai_feed.sap_stock(), omai_feed.sap_items(),
-                       omai_feed.sap_moves(date) FROM PUBLIC;
+                       omai_feed.sap_moves(date), omai_feed.sap_orders() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION omai_feed.sap_pushed(), omai_feed.sap_stock(), omai_feed.sap_items(),
-                          omai_feed.sap_moves(date) TO omai_reader;
+                          omai_feed.sap_moves(date), omai_feed.sap_orders() TO omai_reader;
 
 -- Check (counts only):
 SELECT (SELECT count(*) FROM omai_feed.sap_stock()) AS stock_rows,
        (SELECT count(*) FROM omai_feed.sap_items()) AS items,
-       (SELECT count(*) FROM omai_feed.sap_moves(current_date - 45)) AS move_lines;
+       (SELECT count(*) FROM omai_feed.sap_moves(current_date - 45)) AS move_lines,
+       (SELECT count(*) FROM omai_feed.sap_orders()) AS open_order_lines;

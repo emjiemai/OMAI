@@ -45,3 +45,33 @@ def test_no_push_yet_fails(s):
     with pytest.raises(mgmg_feed.FeedError):
         mgmg_feed.sync(s, {"pushed": {}, "stock": [], "items": []})
     assert s.get(SourceSync, "sap") is None
+
+
+def test_open_sap_orders_become_dispatch_orders(s):
+    """SAP open sales-order lines → one dispatch order per order × warehouse, waiting for release; an order SAP no
+    longer lists is closed in OMAI if not started, flagged if already released (27.11.2026)."""
+    from omai.models import DispatchOrder, Exception_, Item
+
+    s.add_all([Item(sku="TAN9", name="Tanita", sap_code="TAN9")])
+    s.flush()
+    rows = [(501, 1501, 0, "01", "GAR-F8", 2), (501, 1501, 1, "01", "TAN9", 1),      # one order, one warehouse
+            (502, 1502, 0, "01", "TAN9", 1), (502, 1502, 1, "G05", "TAN9", 3),       # one order, two warehouses
+            (503, 1503, 0, "01", "TAN9", 0)]                                          # nothing left to deliver
+    data = {**_data(), "orders": rows}
+    out = mgmg_feed.sync(s, data)["orders"]
+    refs = {o.order_ref: o for o in s.scalars(select(DispatchOrder))}
+    assert out["orders"] == 3 and set(refs) == {"SAP 1501", "SAP 1502-01", "SAP 1502-G05"}
+    assert refs["SAP 1501"].lines == [{"sku": "FENIX8", "qty": 2.0}, {"sku": "TAN9", "qty": 1.0}]
+    assert refs["SAP 1501"].release_status == "pending" and refs["SAP 1501"].customer == ""
+    assert refs["SAP 1502-G05"].location_code == "ST2"
+
+    refs["SAP 1502-01"].release_status = "approved"
+    out = mgmg_feed.sync(s, {**data, "orders": rows[:2]})["orders"]                   # 1502 delivered in SAP
+    assert out == {"orders": 1, "closed_in_sap": 1, "flagged": 1}
+    assert refs["SAP 1502-G05"].status == "closed_in_sap" and refs["SAP 1502-01"].status == "open"
+    assert s.scalar(select(Exception_).where(Exception_.kind == "order_closed_in_sap")).ref == "SAP 1502-01"
+
+
+def test_orders_function_not_installed_skips_orders(s):
+    out = mgmg_feed.sync(s, {**_data(), "orders": None})
+    assert "orders" not in out

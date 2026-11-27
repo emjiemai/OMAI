@@ -22,7 +22,7 @@ TRANSIT = "TRANSIT"   # the transit location; a transfer's units sit in bin = tr
 KIND_UZ = {"allocation_short": "банд қилишга етмади", "count_variance": "санашда фарқ",
            "damaged_receipt": "шикастланган қабул", "erp_posting_pending": "SAP'га киритилмаган",
            "expired_saleable": "муддати ўтган товар сотувда", "late_receipt": "кечиккан қабул",
-           "negative_stock": "манфий қолдиқ", "old_allocation": "эски банд", "over_receipt": "ортиқча қабул",
+           "negative_stock": "манфий қолдиқ", "old_allocation": "эски банд", "order_closed_in_sap": "буюртма SAP'да ёпилган", "over_receipt": "ортиқча қабул",
            "release_blocked": "чиқариш тўхтатилди", "short_receipt": "кам қабул", "source_down": "манба ишламаяпти",
            "system_mismatch": "тизимлар мос эмас", "transfer_incomplete": "кўчириш тугалланмаган",
            "transfer_overdue": "кўчириш кечикди", "unmapped": "боғланмаган товар / жой"}

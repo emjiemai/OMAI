@@ -100,6 +100,18 @@ cp .env.example .env
 Deploy: Render Blueprint (`render.yaml`) — Postgres + one always-on API that runs the schedule, with only the variables OMAI reads set on the service (no `mgmg-shared` group): `ENVIRONMENT`, `TZ`, `DRY_RUN`, `OMAI_TELEGRAM_BOT_TOKEN`, `SAP_PUSH_WEBHOOK_SECRET`, `MGMG_SAP_READER_URL`, `ONEC_ODATA_URL`, `ONEC_LOGIN`, `ONEC_PASSWORD`, `BILLZ_SECRET_TOKEN`; `DATABASE_URL` comes from OMAI's own database. Or
 `docker compose up`.
 
+## Rehearse count day on your computer (real data, test bot)
+
+```bash
+DATABASE_URL=sqlite:///rehearsal.db .venv/bin/python -m scripts.rehearsal
+```
+
+Builds a local `rehearsal.db` from the live systems (read-only): warehouses, items, SAP and 1C stock, the four 1C
+links; three test people `boss` / `ombor` / `tekshir` (one PIN, asked, never shown); 01 switched to OMAI, shelves
+G01–G10 + FLOOR, and the baseline count sent to `ombor`. The local `.env` needs a **test** bot's token, the 1C
+variables and `MGMG_SAP_READER_URL` (omai_reader with mgmg-db's External host). Then run the web app and the bot
+loop with the same `DATABASE_URL=sqlite:///rehearsal.db` in front. Production is not touched.
+
 ## Test it locally (before production)
 
 Nothing here touches production: a local SQLite file, demo data, and a separate **test** Telegram bot.

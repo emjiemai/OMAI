@@ -55,9 +55,11 @@ def read() -> dict[str, Any]:
                 cur.execute("SELECT item_code, item_name, group_name, barcode, uom, inventory_item, active "
                             "FROM omai_feed.sap_items()")
                 items = cur.fetchall()
+                cur.execute("SELECT count(*) FROM omai_feed.sap_moves(current_date - 45)")
+                moves = cur.fetchone()[0]     # a count only: SAP movements arrive once the gateway runs history.js
     except psycopg.Error as exc:   # the class only: a libpq message can carry the host or the user
         raise FeedError(f"mgmg database: {type(exc).__name__}") from None
-    return {"pushed": pushed, "stock": stock, "items": items}
+    return {"pushed": pushed, "stock": stock, "items": items, "moves_45d": moves}
 
 
 def _text(value: object, limit: int) -> str | None:
@@ -114,7 +116,8 @@ def main() -> None:
 
     data = read()
     ages = {k: round((datetime.now(UTC) - v).total_seconds() / 60) for k, v in data["pushed"].items() if v}
-    print(f"stock rows={len(data['stock'])} items={len(data['items'])} last push (min ago)={ages}")
+    print(f"stock rows={len(data['stock'])} items={len(data['items'])} SAP movement lines (45 days)="
+          f"{data.get('moves_45d', '?')} last push (min ago)={ages}")
     if "--sync" in sys.argv:
         from omai.db import init_db, session_scope
 
